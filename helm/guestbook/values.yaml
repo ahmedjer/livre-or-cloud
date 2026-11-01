@@ -22,6 +22,11 @@ nameOverride: ""
 # Optional override for the full resource name.
 fullnameOverride: ""
 
+# Optional selector compatibility override.
+# Empty means use the Helm release name.
+# Used when adopting existing Kubernetes Deployments.
+selectorInstanceOverride: ""
+
 # Common labels applied to Kubernetes resources.
 commonLabels:
   environment: dev

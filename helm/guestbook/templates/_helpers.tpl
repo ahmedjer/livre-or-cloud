@@ -35,10 +35,18 @@ Example: guestbook-0.1.0.
 Stable selector labels for Kubernetes Deployments and Services.
 These labels identify the Helm release.
 */}}
+
+{{/*
+Stable selector labels for Kubernetes Deployments and Services.
+
+By default, use the Helm release name.
+For dev migration, preserve the original immutable selector.
+*/}}
 {{- define "guestbook.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "guestbook.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/instance: {{ default .Release.Name .Values.selectorInstanceOverride }}
 {{- end -}}
+
 
 
 {{/*

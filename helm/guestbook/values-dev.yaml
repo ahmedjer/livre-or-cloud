@@ -5,6 +5,9 @@
 # Namespace: dev
 # =====================================================
 
+# Preserve the immutable selectors of existing dev Deployments.
+selectorInstanceOverride: "guestbook"
+
 # Environment-specific labels.
 commonLabels:
   environment: dev

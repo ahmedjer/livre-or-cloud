@@ -8,6 +8,10 @@ kind: PersistentVolumeClaim
 metadata:
   name: redis-leader-pvc
 
+  # Preserve the PVC when Helm uninstalls the release.
+  annotations:
+    helm.sh/resource-policy: keep
+
   labels:
     {{- include "guestbook.labels" . | nindent 4 }}
     app.kubernetes.io/component: redis-leader

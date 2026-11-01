@@ -1,0 +1,26 @@
+
+# Chart.yaml
+# Helm chart for the Cloud Guestbook application.
+# Deploys a PHP frontend, Redis Leader and Redis Followers
+# with persistent storage on Kubernetes.
+
+apiVersion: v2
+
+# Name of the Helm chart
+name: guestbook
+
+# Description of the application
+description: >
+  Cloud Guestbook application using a PHP frontend,
+  Redis Leader, Redis Followers and persistent storage.
+  Supports dev, staging and prod environments.
+
+# Type of chart
+type: application
+
+# Version of the Helm chart
+# Increment when modifying templates or chart configuration.
+version: 0.1.0
+
+# Version of the application deployed by the chart
+appVersion: "1.0.0"

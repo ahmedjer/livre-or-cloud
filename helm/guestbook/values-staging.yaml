@@ -1,0 +1,27 @@
+
+# =====================================================
+# Staging Environment - Helm Overrides
+# Release: stack-staging
+# Namespace: staging
+# =====================================================
+
+# Environment-specific labels.
+commonLabels:
+  environment: staging
+
+# PHP Frontend configuration.
+frontend:
+  replicaCount: 2
+
+  service:
+    type: LoadBalancer
+    port: 8081
+
+# Redis Leader persistent storage.
+redisLeader:
+  persistence:
+    size: 1Gi
+
+# Number of Redis read replicas.
+redisFollower:
+  replicaCount: 2

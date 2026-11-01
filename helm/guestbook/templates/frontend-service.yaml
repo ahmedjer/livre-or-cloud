@@ -1,0 +1,30 @@
+
+# PHP Guestbook Frontend Service Helm Template
+# Exposes the application using a configurable Service type.
+# Supports LoadBalancer for local minikube testing
+# and ClusterIP for initial GKE deployment.
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: {{ .Values.frontend.service.name }}
+
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+
+spec:
+  # Configurable Service type.
+  type: {{ .Values.frontend.service.type }}
+
+  selector:
+    {{- include "guestbook.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+
+  ports:
+    - name: http
+      port: {{ .Values.frontend.service.port }}
+      targetPort: http
+      protocol: TCP
+

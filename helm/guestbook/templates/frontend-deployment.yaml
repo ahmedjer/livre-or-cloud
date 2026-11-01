@@ -1,0 +1,72 @@
+
+# PHP Guestbook Frontend Deployment Helm Template
+# Deploys the application web interface.
+# Replicas, image, resources and probes are configurable.
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: frontend
+
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+
+spec:
+  # Number of frontend replicas.
+  replicas: {{ .Values.frontend.replicaCount }}
+
+  # Rolling updates to maintain application availability.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      {{- include "guestbook.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+
+  template:
+    metadata:
+      labels:
+        {{- include "guestbook.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+
+    spec:
+      containers:
+        - name: php-redis
+
+          # Official PHP Guestbook image.
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.service.targetPort }}
+              protocol: TCP
+
+          # Load application variables from the ConfigMap.
+          envFrom:
+            - configMapRef:
+                name: frontend-config
+
+          # HTTP readiness probe.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            {{- toYaml .Values.frontend.readinessProbe | nindent 12 }}
+
+          # HTTP liveness probe.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            {{- toYaml .Values.frontend.livenessProbe | nindent 12 }}
+
+          # Configurable CPU and memory resources.
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}

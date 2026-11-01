@@ -1,0 +1,68 @@
+
+============================================================
+ CLOUD GUESTBOOK - HELM DEPLOYMENT
+============================================================
+
+Application: {{ .Chart.Name }}
+Release:     {{ .Release.Name }}
+Namespace:   {{ .Release.Namespace }}
+Chart:       {{ .Chart.Version }}
+App version: {{ .Chart.AppVersion }}
+
+------------------------------------------------------------
+1. CHECK DEPLOYMENT STATUS
+------------------------------------------------------------
+
+helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+kubectl get pods,svc,pvc -n {{ .Release.Namespace }}
+
+------------------------------------------------------------
+2. ACCESS THE GUESTBOOK FRONTEND
+------------------------------------------------------------
+
+Frontend Service: {{ .Values.frontend.service.name }}
+Service type:     {{ .Values.frontend.service.type }}
+Service port:     {{ .Values.frontend.service.port }}
+
+Port forwarding:
+
+kubectl port-forward -n {{ .Release.Namespace }} svc/{{ .Values.frontend.service.name }} {{ add 10000 (int .Values.frontend.service.port) }}:{{ .Values.frontend.service.port }}
+
+Then open:
+
+http://127.0.0.1:{{ add 10000 (int .Values.frontend.service.port) }}
+
+{{- if eq .Values.frontend.service.type "LoadBalancer" }}
+
+For local minikube LoadBalancer access, run:
+
+minikube tunnel
+
+Then inspect the assigned address:
+
+kubectl get svc {{ .Values.frontend.service.name }} -n {{ .Release.Namespace }}
+
+{{- end }}
+
+------------------------------------------------------------
+3. VERIFY REDIS
+------------------------------------------------------------
+
+Redis Leader:
+
+kubectl exec -n {{ .Release.Namespace }} deployment/redis-leader -- redis-cli PING
+
+Redis Follower replication:
+
+kubectl exec -n {{ .Release.Namespace }} deployment/redis-follower -- redis-cli INFO replication
+
+------------------------------------------------------------
+4. RELEASE INFORMATION
+------------------------------------------------------------
+
+helm history {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+helm get values {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+============================================================

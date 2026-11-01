@@ -1,0 +1,17 @@
+
+# Redis Leader ConfigMap Helm template
+# Generates the Redis configuration from values.yaml.
+
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: redis-leader-config
+
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-leader
+
+data:
+  redis.conf: |
+{{ .Values.redisLeader.redisConfig | indent 4 }}

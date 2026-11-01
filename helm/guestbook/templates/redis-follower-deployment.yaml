@@ -1,0 +1,69 @@
+
+# Redis Follower Deployment Helm Template
+# Deploys Redis read replicas synchronized with the Redis Leader.
+# Replica count, image, probes and resources are configurable.
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: redis-follower
+
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-follower
+
+spec:
+  # Configurable replica count.
+  replicas: {{ .Values.redisFollower.replicaCount }}
+
+  # Rolling updates for high availability.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      {{- include "guestbook.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis-follower
+
+  template:
+    metadata:
+      labels:
+        {{- include "guestbook.labels" . | nindent 8 }}
+        app.kubernetes.io/component: redis-follower
+
+    spec:
+      containers:
+        - name: redis-follower
+
+          # Image configured through values.yaml.
+          image: "{{ .Values.redisFollower.image.repository }}:{{ .Values.redisFollower.image.tag }}"
+          imagePullPolicy: {{ .Values.redisFollower.image.pullPolicy }}
+
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redisFollower.service.port }}
+              protocol: TCP
+
+          # Redis readiness probe.
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            {{- toYaml .Values.redisFollower.readinessProbe | nindent 12 }}
+
+          # Redis liveness probe.
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            {{- toYaml .Values.redisFollower.livenessProbe | nindent 12 }}
+
+          # Configurable CPU and memory resources.
+          resources:
+            {{- toYaml .Values.redisFollower.resources | nindent 12 }}

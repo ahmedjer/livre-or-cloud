@@ -1,0 +1,25 @@
+
+# Redis Leader PersistentVolumeClaim
+# Uses dynamic provisioning with the default StorageClass.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+
+metadata:
+  name: redis-leader-pvc
+
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-leader
+
+spec:
+  accessModes:
+    - {{ .Values.redisLeader.persistence.accessMode | quote }}
+
+  resources:
+    requests:
+      storage: {{ .Values.redisLeader.persistence.size | quote }}
+
+  {{- with .Values.redisLeader.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}

@@ -1,0 +1,210 @@
+
+# ============================================================
+# Cloud Guestbook - Helm Default Values
+# ============================================================
+# Default configuration shared by dev, staging and prod.
+# Environment-specific values files override these defaults.
+#
+# Application architecture:
+#   - PHP Guestbook Frontend
+#   - Redis Leader (writes and persistent storage)
+#   - Redis Followers (reads and replication)
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. Global chart configuration
+# ------------------------------------------------------------
+
+# Optional override for the application name.
+nameOverride: ""
+
+# Optional override for the full resource name.
+fullnameOverride: ""
+
+# Common labels applied to Kubernetes resources.
+commonLabels:
+  environment: dev
+  team: platform
+
+
+# ------------------------------------------------------------
+# 2. PHP Guestbook Frontend
+# ------------------------------------------------------------
+
+frontend:
+
+  # Number of frontend Pods.
+  replicaCount: 1
+
+  # Official Guestbook frontend Docker image.
+  image:
+    repository: us-docker.pkg.dev/google-samples/containers/gke/gb-frontend
+    tag: "v5"
+    pullPolicy: IfNotPresent
+
+  # Frontend environment variables.
+  env:
+    # Use Kubernetes DNS for Redis discovery.
+    GET_HOSTS_FROM: "dns"
+
+  # Frontend Kubernetes Service configuration.
+  service:
+    # Service name used to access the frontend.
+    name: frontend
+
+    # LoadBalancer for local minikube testing.
+    # Can be overridden to ClusterIP on GKE.
+    type: LoadBalancer
+
+    # Port exposed by the Kubernetes Service.
+    port: 8080
+
+    # HTTP port inside the frontend container.
+    targetPort: 80
+
+  # CPU and memory reservations and limits.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  # Checks whether the frontend is ready.
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Restarts an unhealthy frontend container.
+  livenessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+
+# ------------------------------------------------------------
+# 3. Redis Leader
+# ------------------------------------------------------------
+
+redisLeader:
+
+  # Exactly one Redis Leader handles write operations.
+  replicaCount: 1
+
+  # Redis Docker image.
+  image:
+    repository: docker.io/redis
+    tag: "6.0.5"
+    pullPolicy: IfNotPresent
+
+  # Internal Kubernetes Service.
+  service:
+    # Name expected by the Guestbook application.
+    name: redis-leader
+
+    # Default Redis TCP port.
+    port: 6379
+
+  # Persistent storage configuration.
+  persistence:
+    # PVC storage capacity.
+    size: 1Gi
+
+    # A single node can mount the volume for writing.
+    accessMode: ReadWriteOnce
+
+    # Empty means the Helm template must OMIT
+    # storageClassName to use the default StorageClass.
+    storageClass: ""
+
+  # Redis configuration stored in a ConfigMap.
+  redisConfig: |
+    # Listen on the container network interface.
+    bind 0.0.0.0
+
+    # Lab-only setting: authentication is not configured.
+    protected-mode no
+
+    # Persistent data directory.
+    dir /data
+
+    # Enable append-only persistence.
+    appendonly yes
+
+    # Synchronize every write to disk.
+    appendfsync always
+
+  # CPU and memory reservations and limits.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  # Checks whether Redis responds to commands.
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+  # Restarts Redis if it becomes unresponsive.
+  livenessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+
+# ------------------------------------------------------------
+# 4. Redis Followers
+# ------------------------------------------------------------
+
+redisFollower:
+
+  # Number of Redis read replicas.
+  replicaCount: 1
+
+  # Official Guestbook Redis Follower Docker image.
+  image:
+    repository: us-docker.pkg.dev/google-samples/containers/gke/gb-redis-follower
+    tag: "v2"
+    pullPolicy: IfNotPresent
+
+  # Internal Kubernetes Service.
+  service:
+    # Name expected by the Guestbook frontend.
+    name: redis-follower
+
+    # Default Redis TCP port.
+    port: 6379
+
+  # CPU and memory reservations and limits.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 100Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  # Checks whether a Redis Follower is ready.
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+  # Restarts an unresponsive Redis Follower.
+  livenessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3

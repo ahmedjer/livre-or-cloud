@@ -1,0 +1,27 @@
+
+# Redis Leader Service
+# Internal ClusterIP Service for Redis write operations.
+# The service name must remain redis-leader.
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: {{ .Values.redisLeader.service.name }}
+
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-leader
+
+spec:
+  type: ClusterIP
+
+  selector:
+    {{- include "guestbook.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-leader
+
+  ports:
+    - name: redis
+      port: {{ .Values.redisLeader.service.port }}
+      targetPort: redis
+      protocol: TCP

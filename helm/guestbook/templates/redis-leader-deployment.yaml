@@ -1,0 +1,81 @@
+
+# Redis Leader Deployment
+# One Redis writer with persistent storage.
+# Recreate strategy avoids overlapping Redis Leader Pods.
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: redis-leader
+
+  labels:
+    {{- include "guestbook.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-leader
+
+spec:
+  replicas: {{ .Values.redisLeader.replicaCount }}
+
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      {{- include "guestbook.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis-leader
+
+  template:
+    metadata:
+      labels:
+        {{- include "guestbook.labels" . | nindent 8 }}
+        app.kubernetes.io/component: redis-leader
+
+    spec:
+      containers:
+        - name: redis-leader
+
+          image: "{{ .Values.redisLeader.image.repository }}:{{ .Values.redisLeader.image.tag }}"
+          imagePullPolicy: {{ .Values.redisLeader.image.pullPolicy }}
+
+          command:
+            - redis-server
+            - /usr/local/etc/redis/redis.conf
+
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redisLeader.service.port }}
+              protocol: TCP
+
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            {{- toYaml .Values.redisLeader.readinessProbe | nindent 12 }}
+
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            {{- toYaml .Values.redisLeader.livenessProbe | nindent 12 }}
+
+          resources:
+            {{- toYaml .Values.redisLeader.resources | nindent 12 }}
+
+          volumeMounts:
+            - name: redis-config
+              mountPath: /usr/local/etc/redis
+              readOnly: true
+
+            - name: redis-data
+              mountPath: /data
+
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-leader-config
+
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-leader-pvc

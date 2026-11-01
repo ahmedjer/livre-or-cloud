@@ -1,0 +1,27 @@
+
+# =====================================================
+# Development Environment - Helm Overrides
+# Release: stack-dev
+# Namespace: dev
+# =====================================================
+
+# Environment-specific labels.
+commonLabels:
+  environment: dev
+
+# PHP Frontend configuration.
+frontend:
+  replicaCount: 1
+
+  service:
+    type: LoadBalancer
+    port: 8080
+
+# Redis Leader persistent storage.
+redisLeader:
+  persistence:
+    size: 1Gi
+
+# Number of Redis read replicas.
+redisFollower:
+  replicaCount: 1

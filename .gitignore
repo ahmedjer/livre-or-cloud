@@ -20,3 +20,6 @@ crash.*.log
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Generated Helm packages
+helm/packages/

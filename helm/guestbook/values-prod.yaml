@@ -1,0 +1,27 @@
+
+# =====================================================
+# Production Environment - Helm Overrides
+# Release: stack-prod
+# Namespace: prod
+# =====================================================
+
+# Environment-specific labels.
+commonLabels:
+  environment: prod
+
+# PHP Frontend configuration.
+frontend:
+  replicaCount: 3
+
+  service:
+    type: LoadBalancer
+    port: 8082
+
+# Redis Leader persistent storage.
+redisLeader:
+  persistence:
+    size: 2Gi
+
+# Number of Redis read replicas.
+redisFollower:
+  replicaCount: 2

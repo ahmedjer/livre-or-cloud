@@ -1,0 +1,4 @@
+﻿NAME         	NAMESPACE	REVISION	UPDATED                              	STATUS  	CHART          	APP VERSION
+stack-dev    	dev      	1       	2026-11-01 15:27:10.8426298 +0100 CET	deployed	guestbook-0.1.0	1.0.0      
+stack-prod   	prod     	1       	2026-11-01 15:05:08.8030168 +0100 CET	deployed	guestbook-0.1.0	1.0.0      
+stack-staging	staging  	3       	2026-11-01 15:12:31.3627486 +0100 CET	deployed	guestbook-0.1.0	1.0.0      

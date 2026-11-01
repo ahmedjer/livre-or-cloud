@@ -1,0 +1,2 @@
+﻿NAME               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+redis-leader-pvc   Bound    pvc-95ba6003-6399-4b5d-b8ff-024baebec02d   1Gi        RWO            standard       <unset>                 3h31m

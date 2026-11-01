@@ -1,0 +1,4 @@
+﻿NAME             READY   UP-TO-DATE   AVAILABLE   AGE
+frontend         1/1     1            1           179m
+redis-follower   1/1     1            1           3h4m
+redis-leader     1/1     1            1           3h24m

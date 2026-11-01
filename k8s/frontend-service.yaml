@@ -1,0 +1,29 @@
+
+# Frontend Service
+# Exposes the PHP Guestbook outside the local Kubernetes cluster.
+# Uses port 8080 to avoid conflicts with staging and production.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: guestbook
+
+spec:
+  # Local deployment: exposed with minikube tunnel.
+  type: LoadBalancer
+
+  selector:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: frontend
+
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

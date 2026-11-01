@@ -1,0 +1,85 @@
+
+# Frontend Deployment
+# Runs the PHP Guestbook interface.
+# Reads Redis connection settings from the ConfigMap.
+# Supports rolling updates, health probes and resource limits.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: guestbook
+
+spec:
+  # One frontend replica in the development environment.
+  replicas: 1
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guestbook
+      app.kubernetes.io/instance: guestbook
+      app.kubernetes.io/component: frontend
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guestbook
+        app.kubernetes.io/instance: guestbook
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: guestbook
+
+    spec:
+      containers:
+        - name: php-redis
+
+          # Official Kubernetes Guestbook frontend image.
+          image: us-docker.pkg.dev/google-samples/containers/gke/gb-frontend:v5
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+
+          # Load environment variables from ConfigMap.
+          envFrom:
+            - configMapRef:
+                name: frontend-config
+
+          # Checks whether the frontend can receive traffic.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Restarts the container if the HTTP server stops responding.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

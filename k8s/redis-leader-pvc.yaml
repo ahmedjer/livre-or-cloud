@@ -1,0 +1,21 @@
+
+# Redis Leader PersistentVolumeClaim
+# Requests persistent storage for Redis application data.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-leader-pvc
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: redis-leader
+    app.kubernetes.io/part-of: guestbook
+
+spec:
+  accessModes:
+    - ReadWriteOnce
+
+  resources:
+    requests:
+      storage: 1Gi

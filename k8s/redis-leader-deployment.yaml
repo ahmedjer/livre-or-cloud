@@ -1,0 +1,99 @@
+
+# Redis Leader Deployment
+# Runs a single Redis writer with persistent storage.
+# Recreate prevents old and new writers running simultaneously.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-leader
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: redis-leader
+    app.kubernetes.io/part-of: guestbook
+
+spec:
+  replicas: 1
+
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guestbook
+      app.kubernetes.io/instance: guestbook
+      app.kubernetes.io/component: redis-leader
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guestbook
+        app.kubernetes.io/instance: guestbook
+        app.kubernetes.io/component: redis-leader
+        app.kubernetes.io/part-of: guestbook
+
+    spec:
+      containers:
+        - name: redis-leader
+          image: docker.io/redis:6.0.5
+          imagePullPolicy: IfNotPresent
+
+          # Load Redis settings from our ConfigMap.
+          command:
+            - redis-server
+            - /usr/local/etc/redis/redis.conf
+
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+
+          # Readiness: can this Pod receive traffic?
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          # Liveness: should Kubernetes restart Redis?
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+
+          volumeMounts:
+            # Redis configuration from ConfigMap.
+            - name: redis-config
+              mountPath: /usr/local/etc/redis
+              readOnly: true
+
+            # Persistent storage for Redis data.
+            - name: redis-data
+              mountPath: /data
+
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-leader-config
+
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-leader-pvc

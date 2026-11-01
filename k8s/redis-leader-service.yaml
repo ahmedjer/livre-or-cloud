@@ -1,0 +1,28 @@
+
+# Redis Leader Service
+# Internal ClusterIP Service for the Guestbook application.
+# Exposes the Redis leader only within the Kubernetes cluster.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-leader
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: redis-leader
+    app.kubernetes.io/part-of: guestbook
+
+spec:
+  type: ClusterIP
+
+  selector:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: redis-leader
+
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP

@@ -1,0 +1,31 @@
+
+# Redis Leader ConfigMap
+# Configures persistence and internal network access for the lab.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-leader-config
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: redis-leader
+    app.kubernetes.io/part-of: guestbook
+
+data:
+  redis.conf: |
+    # Listen on the Pod network interface.
+    bind 0.0.0.0
+
+    # Lab only: other Pods need access without authentication.
+    # Production requires Redis ACLs and network restrictions.
+    protected-mode no
+
+    # Persistent data directory.
+    dir /data
+
+    # Enable append-only persistence.
+    appendonly yes
+
+    # Synchronize every write to disk.
+    appendfsync always

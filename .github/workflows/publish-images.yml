@@ -1,0 +1,40 @@
+﻿name: Publish Guestbook Images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+
+      - name: Publish images to GitHub Container Registry
+        env:
+          GH_USER: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          skopeo copy --all \
+            --dest-creds "$GH_USER:$GH_TOKEN" \
+            docker://us-docker.pkg.dev/google-samples/containers/gke/gb-frontend:v5 \
+            docker://ghcr.io/ahmedjer/guestbook-frontend:v5
+
+          skopeo copy --all \
+            --dest-creds "$GH_USER:$GH_TOKEN" \
+            docker://us-docker.pkg.dev/google-samples/containers/gke/gb-redis-follower:v2 \
+            docker://ghcr.io/ahmedjer/guestbook-redis-follower:v2
+
+          skopeo copy --all \
+            --dest-creds "$GH_USER:$GH_TOKEN" \
+            docker://docker.io/library/redis:6.0.5 \
+            docker://ghcr.io/ahmedjer/guestbook-redis-leader:6.0.5

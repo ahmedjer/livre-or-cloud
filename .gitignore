@@ -1,0 +1,22 @@
+# Terraform working files and state
+**/.terraform/
+*.tfstate
+*.tfstate.*
+**/terraform.tfvars
+*.tfplan
+crash.log
+crash.*.log
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+**/kubeconfig
+**/kubeconfig.*
+*.pem
+*.key
+
+# Editor and OS
+.vscode/
+.DS_Store
+Thumbs.db

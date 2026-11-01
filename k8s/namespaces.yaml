@@ -1,0 +1,29 @@
+
+# namespaces.yaml
+# Creates three isolated environments for the Cloud Guestbook application.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    environment: dev
+    app.kubernetes.io/part-of: guestbook
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    environment: staging
+    app.kubernetes.io/part-of: guestbook
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    environment: prod
+    app.kubernetes.io/part-of: guestbook

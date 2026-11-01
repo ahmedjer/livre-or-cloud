@@ -1,0 +1,23 @@
+
+# Example Terraform variables for the Cloud Guestbook.
+#
+# Copy this file to terraform.tfvars when the lab starts.
+# Replace placeholders with values from the lab.
+#
+# Never commit the real terraform.tfvars file.
+
+project_id = "REPLACE_WITH_LAB_PROJECT_ID"
+
+cluster_name = "autopilot-cluster-1"
+
+region = "REPLACE_WITH_LAB_REGION"
+
+network    = "default"
+subnetwork = "default"
+
+ip_range_pods     = null
+ip_range_services = null
+
+release_channel = "REGULAR"
+
+deletion_protection = false

@@ -1,25 +1,66 @@
-# Terraform working files and state
+
+# ============================================
+# Cloud Guestbook - .gitignore
+# Kubernetes | Helm | Terraform | GKE
+# ============================================
+
+# --------------------------------------------
+# Terraform local files and downloaded providers
+# --------------------------------------------
 **/.terraform/
+
+# Terraform state files
 *.tfstate
 *.tfstate.*
-**/terraform.tfvars
+
+# Terraform variable files (may contain secrets)
+**/*.tfvars
+**/*.tfvars.json
+
+# Terraform plans
 *.tfplan
+
+# Terraform crash logs
 crash.log
 crash.*.log
 
+# Keep .terraform.lock.hcl tracked in Git
+
+# --------------------------------------------
 # Credentials and local configuration
+# --------------------------------------------
 .env
 .env.*
 !.env.example
+
+# Kubernetes configuration and credentials
 **/kubeconfig
 **/kubeconfig.*
 *.pem
 *.key
 
-# Editor and OS
+# Google Cloud credentials
+application_default_credentials.json
+*service-account*.json
+
+# --------------------------------------------
+# Helm generated files
+# --------------------------------------------
+helm/packages/
+*.tgz
+
+# --------------------------------------------
+# Editors and operating systems
+# --------------------------------------------
 .vscode/
+.idea/
 .DS_Store
 Thumbs.db
 
-# Generated Helm packages
-helm/packages/
+# Python temporary files
+__pycache__/
+*.pyc
+
+# Temporary and backup files
+*.tmp
+*.bak

@@ -1,0 +1,83 @@
+
+# Redis Follower Deployment
+# Creates Redis read replicas that synchronize with redis-leader.
+# Uses RollingUpdate to avoid unnecessary downtime.
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: redis-follower
+  labels:
+    app.kubernetes.io/name: guestbook
+    app.kubernetes.io/instance: guestbook
+    app.kubernetes.io/component: redis-follower
+    app.kubernetes.io/part-of: guestbook
+
+spec:
+  # One follower in dev to save resources.
+  replicas: 1
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guestbook
+      app.kubernetes.io/instance: guestbook
+      app.kubernetes.io/component: redis-follower
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guestbook
+        app.kubernetes.io/instance: guestbook
+        app.kubernetes.io/component: redis-follower
+        app.kubernetes.io/part-of: guestbook
+
+    spec:
+      containers:
+        - name: redis-follower
+
+          # Official Guestbook Redis Follower image.
+          image: us-docker.pkg.dev/google-samples/containers/gke/gb-redis-follower:v2
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+
+          # Checks whether Redis is ready for traffic.
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          # Restarts the container if Redis stops responding.
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          # CPU and memory requests and limits.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

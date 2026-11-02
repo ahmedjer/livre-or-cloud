@@ -1,0 +1,14 @@
+$ kubectl exec -n prod deploy/redis-leader -- redis-cli GET guestbook
+,test gke
+$ kubectl delete -n prod pod/redis-leader-84699dcc6f-ngskg
+pod "redis-leader-84699dcc6f-ngskg" deleted from prod namespace
+$ kubectl rollout status deploy/redis-leader -n prod
+Waiting for deployment "redis-leader" rollout to finish: 0 of 1 updated replicas are available...
+deployment "redis-leader" successfully rolled out
+$ kubectl get pod -n prod -l app.kubernetes.io/component=redis-leader
+NAME                            READY   STATUS    RESTARTS   AGE
+redis-leader-84699dcc6f-877l4   1/1     Running   0          7s
+$ kubectl exec -n prod deploy/redis-leader -- redis-cli GET guestbook
+,test gke
+$ curl "http://34.9.113.94:8082/guestbook.php?cmd=get&key=messages"
+{"data": ",test gke"}

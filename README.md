@@ -15,10 +15,10 @@
 | Helm upgrade / rollback | **Validé** | Staging : révisions 1 → 2 → 3 (rollback vers 1) |
 | Migration de `dev` de `kubectl` vers Helm | **Validé** | PVC et PV d’origine conservés |
 | Terraform : init, fmt, validate | **Validé** | Module GKE v46.0.0 initialisé, configuration valide |
-| GKE Autopilot : apply et tests cloud | **Non réalisé** | Accès Google Skills suspendu ; aucune ressource cloud n’a été créée |
-| Idempotence `terraform plan` après `apply` | **À valider sur GKE** | Nécessite un projet de laboratoire actif |
+| GKE Autopilot : apply et tests cloud | **Validé** (2/11) | apply, 3 releases, test de persistance en prod, destroy : voir `docs/evidence/gke-*.txt` |
+| Idempotence `terraform plan` après `apply` | **Validé** (2/11) | `No changes` (dans `gke-terraform.txt`) |
 
-**Important :** les commandes GKE de ce document constituent un **runbook préparé**, et non une preuve de déploiement effectif. Ne pas présenter le cloud comme déjà testé.
+Test GKE du 2/11 fait par Sylvain sur le lab. Pas encore fait sur GKE : l'étape ClusterIP + port-forward (installé direct en LoadBalancer).
 
 ### Objectif métier
 

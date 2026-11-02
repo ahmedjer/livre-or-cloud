@@ -1,0 +1,46 @@
+$ kubectl config current-context
+gke_qwiklabs-gcp-xx-xxxx_us-central1_autopilot-cluster-1
+$ helm list -A
+NAME         	NAMESPACE	REVISION	UPDATED                              	STATUS  	CHART          	APP VERSION
+stack-dev    	dev      	1       	2026-11-02 22:34:36.1389521 +0100 CET	deployed	guestbook-0.1.1	1.0.0      
+stack-prod   	prod     	1       	2026-11-02 22:34:45.4907872 +0100 CET	deployed	guestbook-0.1.1	1.0.0      
+stack-staging	staging  	1       	2026-11-02 22:34:41.1260912 +0100 CET	deployed	guestbook-0.1.1	1.0.0      
+$ kubectl get deploy,svc,pvc -n dev
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/frontend         1/1     1            1           6m44s
+deployment.apps/redis-follower   1/1     1            1           6m44s
+deployment.apps/redis-leader     1/1     1            1           6m44s
+
+NAME                     TYPE           CLUSTER-IP       EXTERNAL-IP     PORT(S)          AGE
+service/frontend         LoadBalancer   34.118.226.18    34.132.30.175   8080:30272/TCP   6m44s
+service/redis-follower   ClusterIP      34.118.233.131   <none>          6379/TCP         6m44s
+service/redis-leader     ClusterIP      34.118.232.249   <none>          6379/TCP         6m44s
+
+NAME                                     STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/redis-leader-pvc   Bound    pvc-37bd1f1d-1ae9-4fce-b838-e1e8cb551db7   1Gi        RWO            standard-rwo   <unset>                 6m44s
+$ kubectl get deploy,svc,pvc -n staging
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/frontend         2/2     2            2           6m41s
+deployment.apps/redis-follower   2/2     2            2           6m41s
+deployment.apps/redis-leader     1/1     1            1           6m41s
+
+NAME                     TYPE           CLUSTER-IP       EXTERNAL-IP      PORT(S)          AGE
+service/frontend         LoadBalancer   34.118.236.224   35.238.130.201   8081:31145/TCP   6m41s
+service/redis-follower   ClusterIP      34.118.234.40    <none>           6379/TCP         6m41s
+service/redis-leader     ClusterIP      34.118.237.126   <none>           6379/TCP         6m41s
+
+NAME                                     STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/redis-leader-pvc   Bound    pvc-c0b580f3-c286-4a96-80f9-492b9b270bbb   1Gi        RWO            standard-rwo   <unset>                 6m41s
+$ kubectl get deploy,svc,pvc -n prod
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/frontend         3/3     3            3           6m37s
+deployment.apps/redis-follower   2/2     2            2           6m37s
+deployment.apps/redis-leader     1/1     1            1           6m37s
+
+NAME                     TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+service/frontend         LoadBalancer   34.118.238.148   34.9.113.94   8082:32152/TCP   6m37s
+service/redis-follower   ClusterIP      34.118.226.126   <none>        6379/TCP         6m37s
+service/redis-leader     ClusterIP      34.118.231.39    <none>        6379/TCP         6m37s
+
+NAME                                     STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/redis-leader-pvc   Bound    pvc-35b369bd-6f4f-427f-a593-9333694a12af   2Gi        RWO            standard-rwo   <unset>                 6m38s

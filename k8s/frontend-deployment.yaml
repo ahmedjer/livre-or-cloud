@@ -1,8 +1,6 @@
 
-# Frontend Deployment
-# Runs the PHP Guestbook interface.
-# Reads Redis connection settings from the ConfigMap.
-# Supports rolling updates, health probes and resource limits.
+# Deployment du frontend PHP (l'interface web du livre d'or).
+# Les variables viennent de la ConfigMap frontend-config.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -15,7 +13,7 @@ metadata:
     app.kubernetes.io/part-of: guestbook
 
 spec:
-  # One frontend replica in the development environment.
+  # 1 pod pour le frontend.
   replicas: 1
 
   strategy:
@@ -42,7 +40,7 @@ spec:
       containers:
         - name: php-redis
 
-          # Official Kubernetes Guestbook frontend image.
+          # Image officielle du frontend Guestbook.
           image: us-docker.pkg.dev/google-samples/containers/gke/gb-frontend:v5
           imagePullPolicy: IfNotPresent
 
@@ -51,12 +49,12 @@ spec:
               containerPort: 80
               protocol: TCP
 
-          # Load environment variables from ConfigMap.
+          # Variables d'environnement lues dans la ConfigMap.
           envFrom:
             - configMapRef:
                 name: frontend-config
 
-          # Checks whether the frontend can receive traffic.
+          # Readiness : le pod reçoit du trafic seulement si la page / répond.
           readinessProbe:
             httpGet:
               path: /
@@ -66,7 +64,7 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
 
-          # Restarts the container if the HTTP server stops responding.
+          # Liveness : le conteneur est redémarré si la page / ne répond plus.
           livenessProbe:
             httpGet:
               path: /
@@ -79,7 +77,7 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 100Mi
+              memory: 128Mi
             limits:
               cpu: 250m
               memory: 256Mi

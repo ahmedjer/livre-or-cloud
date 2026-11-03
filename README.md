@@ -1,541 +1,605 @@
-# Livre d’or Cloud — Kubernetes, Helm, Terraform & GKE Autopilot
+# Livre d'or Cloud : GKE + Terraform + Helm
 
-> **Projet pédagogique Cloud Hôtels — transfert en exploitation.** Une application Guestbook PHP + Redis, persistante et déployable dans trois environnements isolés, en local sur Minikube et, lorsque l'accès au laboratoire le permet, sur Google Kubernetes Engine (GKE) Autopilot.
+Projet d'équipe (5 étudiants). Ce README explique ce qu'on a construit et comment tout refaire
+de zéro : créer le cluster, déployer les 3 environnements (sur le cloud et en local) et faire les
+opérations courantes.
 
-**Dépôt :** [github.com/ahmedjer/livre-or-cloud](https://github.com/ahmedjer/livre-or-cloud)  
-**Documentation :** [Architecture](docs/architecture.md) · [Runbooks d’exploitation](docs/runbooks.md) · [Preuves locales](docs/evidence/)
+Dépôt : https://github.com/ahmedjer/livre-or-cloud
 
-## 1. État d’avancement et périmètre
+Autres documents :
 
-| Domaine | État au 1er novembre 2026 | Preuve / commentaire |
-|---|---|---|
-| Manifestes Kubernetes sur Minikube | **Validé** | Pods, Services, ConfigMaps, PVC et probes |
-| Redis persistant et réplication leader/followers | **Validé** | Données préservées lors de redémarrages ; réplication active |
-| Helm : `dev`, `staging`, `prod` | **Validé** | Trois releases `deployed` avec le même chart |
-| Helm upgrade / rollback | **Validé** | Staging : révisions 1 → 2 → 3 (rollback vers 1) |
-| Migration de `dev` de `kubectl` vers Helm | **Validé** | PVC et PV d’origine conservés |
-| Terraform : init, fmt, validate | **Validé** | Module GKE v46.0.0 initialisé, configuration valide |
-| GKE Autopilot : apply et tests cloud | **Validé** (2/11) | apply, 3 releases, test de persistance en prod, destroy : voir `docs/evidence/gke-*.txt` |
-| Idempotence `terraform plan` après `apply` | **Validé** (2/11) | `No changes` (dans `gke-terraform.txt`) |
+- [docs/architecture.md](docs/architecture.md) : schémas et liste des objets
+- [docs/runbooks.md](docs/runbooks.md) : les procédures d'exploitation
+- [docs/decisions.md](docs/decisions.md) : nos choix techniques et pourquoi
+- [docs/evidence/](docs/evidence/) : les sorties de nos tests
 
-Test GKE du 2/11 fait par Sylvain sur le lab. Pas encore fait sur GKE : l'étape ClusterIP + port-forward (installé direct en LoadBalancer).
+## Sommaire
 
-### Objectif métier
+0. [Où on en est](#0-où-on-en-est)
+1. [Présentation](#1-présentation)
+2. [Architecture](#2-architecture)
+3. [Organisation du dépôt](#3-organisation-du-dépôt)
+4. [Prérequis](#4-prérequis)
+5. [Tout déployer de zéro](#5-tout-déployer-de-zéro)
+6. [Exploitation](#6-exploitation)
+7. [Référence Terraform et Helm](#7-référence-terraform-et-helm)
+8. [Nos choix techniques](#8-nos-choix-techniques)
+9. [En cas de problème](#9-en-cas-de-problème)
+10. [Limites](#10-limites)
+11. [Démonstration](#11-démonstration)
 
-Cloud Hôtels souhaite afficher et conserver les messages laissés par ses clients. Le prototype initial perdait ses données au redémarrage : la solution ajoute un stockage persistant à Redis, externalise la configuration et automatise le déploiement.
+## 0. Où on en est
 
-### Frontière des responsabilités
+| Partie | État |
+|---|---|
+| Manifestes `k8s/` sur minikube | testé |
+| Persistance Redis (on supprime le pod, les messages restent) | testé sur minikube et sur GKE |
+| 3 releases Helm sur minikube | testé (chart 0.1.0) |
+| `helm upgrade` et `helm rollback` | testé sur minikube (chart 0.1.0) |
+| Terraform : `apply`, `plan` (No changes), `destroy` | testé sur GKE le 02/11 |
+| 3 releases Helm sur GKE | testé le 02/11 (chart 0.1.1, installées directement en LoadBalancer) |
+| Sur GKE : test en ClusterIP + port-forward, puis passage en LoadBalancer | pas encore fait |
+| Chart 0.2.0 (version actuelle) | `helm lint` OK, pas encore redéployé sur minikube ni sur GKE |
 
-- **Terraform** crée le cluster managé **GKE Autopilot**, à l’aide du module imposé ; il ne déploie pas Guestbook.
-- **Kubernetes** exécute et isole les composants applicatifs, Services, ConfigMaps et PVC.
-- **Helm** déploie, met à jour et restaure Guestbook dans les trois namespaces. Aucun objet applicatif GKE n’est déployé par Terraform.
-- **Git** versionne la configuration, la documentation et le fichier `.terraform.lock.hcl`, jamais les états Terraform ni les identifiants du laboratoire.
+Dans la version 0.2.0 on a changé les noms des objets : ils sont maintenant générés par
+`_helpers.tpl` (par exemple `stack-prod-guestbook-redis-leader` au lieu de `redis-leader`). Les
+fichiers de `docs/evidence/` ont été faits avant, donc on y voit encore les anciens noms.
+
+## 1. Présentation
+
+Cloud Hôtels veut un livre d'or : les clients laissent un message à la fin de leur séjour et les
+messages s'affichent dans le hall. Le premier prototype perdait tous les messages quand il
+redémarrait.
+
+On utilise l'application d'exemple Guestbook de Kubernetes :
+
+- un **frontend** PHP (le site web) ;
+- un **Redis leader** qui reçoit les écritures ;
+- des **Redis followers**, des copies du leader qui servent à lire les messages.
+
+Ce qu'on a ajouté : un volume persistant pour Redis (les messages ne sont plus perdus), la
+configuration dans des ConfigMaps, un chart Helm unique pour 3 environnements (dev, staging,
+prod) et un cluster GKE créé avec Terraform.
+
+Ce qui est automatisé :
+
+- création et suppression du cluster GKE (Terraform) ;
+- installation, mise à jour et retour arrière de l'application (Helm).
+
+Ce qui reste manuel :
+
+- lancer la session de lab et remplir `terraform.tfvars` ;
+- se connecter avec `gcloud` ;
+- lancer `minikube tunnel` ou `kubectl port-forward` pour accéder au site ;
+- les sauvegardes de Redis et la suppression des volumes à la fin.
+
+Le fichier `.github/workflows/publish-images.yml` copie juste les images vers GitHub. Il n'est
+pas utilisé pour le déploiement.
 
 ## 2. Architecture
 
-```mermaid
-flowchart TB
-    G["Dépôt Git : terraform/ · k8s/ · helm/guestbook/ · docs/"]
-    G --> T["Terraform → GKE Autopilot (cloud : non validé)"]
-    G --> M["Docker Desktop → Minikube (local : validé)"]
-    T --> H["Même chart Helm"]
-    M --> H
-    H --> D["Namespace dev : stack-dev"]
-    H --> S["Namespace staging : stack-staging"]
-    H --> P["Namespace prod : stack-prod"]
+```
+                 Dépôt Git : terraform/  k8s/  helm/guestbook/  docs/
+                          |                         |
+   CLOUD                  v                         v                LOCAL
+   terraform apply -> cluster GKE              minikube (Docker Desktop)
+   "autopilot-cluster-1"                             |
+   gcloud get-credentials -> kubectl           kubectl (contexte minikube)
+            |                                        |
+            +-------- le MÊME chart helm/guestbook --+
+                namespace dev     : release stack-dev     (values-dev.yaml)
+                namespace staging : release stack-staging (values-staging.yaml)
+                namespace prod    : release stack-prod    (values-prod.yaml)
 ```
 
-Dans **chaque** namespace :
+Dans chaque namespace :
 
-```mermaid
-flowchart TB
-    U["Navigateur"] --> SF["Service frontend : LoadBalancer ou ClusterIP"]
-    SF --> F["Deployment PHP frontend"]
-    CF["ConfigMap frontend"] -.-> F
-    F -->|écritures| SL["Service redis-leader"]
-    F -->|lectures| SR["Service redis-follower"]
-    SL --> L["Deployment Redis Leader : 1 replica · Recreate"]
-    SR --> R["Deployment Redis Follower : N replicas"]
-    R -->|réplication depuis le leader| L
-    CR["ConfigMap redis.conf"] -.-> L
-    L -->|/data| PVC["PVC redis-leader-pvc"]
-    PVC --> PV["PV dynamique · StorageClass par défaut"]
+```
+  navigateur -> Service frontend -> pods frontend (PHP)
+                                      |               |
+                                 écritures         lectures
+                                      v               v
+                       Service redis-leader     Service redis-follower
+                                      v               v
+                          pod redis-leader  <--  pods redis-follower
+                          (1 seul, Recreate)     (copient le leader)
+                                      |
+                                      v
+                          volume persistant (PVC) monté sur /data
 ```
 
-Les noms de Services **`redis-leader`** et **`redis-follower`** sont indispensables à la résolution DNS utilisée par les images officielles Guestbook. Redis n’est pas exposé publiquement ; seuls les frontends peuvent être publiés.
+- **Terraform crée le cluster, Helm installe l'application.** Terraform ne déploie rien dans le
+  cluster et Helm ne crée rien dans GCP.
+- Les messages sont dans Redis, enregistrés dans le fichier `/data/appendonly.aof` du leader, sur
+  le volume persistant. Il y a un volume par environnement.
+- Redis n'est jamais accessible de l'extérieur. Seul le Service `frontend` peut l'être.
 
-### Environnements et capacités
+Plus de détails : [docs/architecture.md](docs/architecture.md).
 
-| Ressource | `dev` | `staging` | `prod` |
-|---|---:|---:|---:|
-| Release Helm | `stack-dev` | `stack-staging` | `stack-prod` |
-| Réplicas frontend | 1 | 2 | 3 |
-| Redis Leader | 1 | 1 | 1 |
-| Réplicas Redis Follower | 1 | 2 | 2 |
-| PVC Redis Leader | 1 GiB | 1 GiB | 2 GiB |
-| Port Service frontend local | 8080 | 8081 | 8082 |
+## 3. Organisation du dépôt
 
-Chaque namespace dispose de **3 Deployments, 3 Services, 2 ConfigMaps et 1 PVC**. Les messages ne sont pas partagés entre les environnements.
-
-### Images et stratégies
-
-| Composant | Image versionnée | Stratégie |
-|---|---|---|
-| Redis Leader | `docker.io/redis:6.0.5` | `Recreate` |
-| Redis Follower | `us-docker.pkg.dev/google-samples/containers/gke/gb-redis-follower:v2` | `RollingUpdate` |
-| Frontend PHP | `us-docker.pkg.dev/google-samples/containers/gke/gb-frontend:v5` | `RollingUpdate` |
-
-Les Deployments définissent les ressources CPU/mémoire ainsi que les **readiness** et **liveness probes**. Le leader utilise le PVC monté sur `/data`, avec `appendonly yes` et `appendfsync always` dans `redis.conf`.
-
-**Pourquoi `Recreate` ?** Le Redis Leader est l’unique écrivain sur le volume `ReadWriteOnce`. Éviter le chevauchement d’anciens et nouveaux Pods réduit les conflits d’accès au volume, au prix d’une brève indisponibilité pendant son redémarrage.
-
-Détails : [docs/architecture.md](docs/architecture.md).
-
-## 3. Structure du dépôt
-
-```text
+```
 livre-or-cloud/
-├── README.md                       # Point d'entrée / passation
-├── .gitignore                      # Exclut secrets, state, caches et packages
-├── k8s/                            # Manifestes Kubernetes de référence
-│   ├── namespaces.yaml
-│   └── *.yaml                       # Deployments, Services, ConfigMaps, PVC
-├── helm/
-│   └── guestbook/
-│       ├── Chart.yaml              # Chart 0.1.1, appVersion 1.0.0
-│       ├── values.yaml             # Valeurs par défaut documentées
-│       ├── values-dev.yaml
-│       ├── values-staging.yaml
-│       ├── values-prod.yaml
-│       ├── .helmignore
-│       └── templates/              # 9 ressources, helpers, NOTES
+├── README.md                     ce document
+├── .gitignore                    state, tfvars, kubeconfig, identifiants...
+├── docs/
+│   ├── architecture.md           schémas, objets, où sont les données
+│   ├── runbooks.md               procédures d'exploitation (R1 à R12)
+│   ├── decisions.md              nos choix techniques
+│   └── evidence/                 sorties de nos tests
 ├── terraform/
-│   ├── versions.tf
-│   ├── variables.tf
-│   ├── main.tf
-│   ├── outputs.tf
-│   ├── terraform.tfvars.example
-│   └── .terraform.lock.hcl
-└── docs/
-    ├── architecture.md
-    ├── runbooks.md
-    └── evidence/                   # Sorties de contrôles Minikube
+│   ├── versions.tf               versions de Terraform et des providers
+│   ├── variables.tf              les variables
+│   ├── main.tf                   appel du module GKE
+│   ├── outputs.tf                ce qu'on affiche après apply
+│   ├── terraform.tfvars.example  modèle (le vrai terraform.tfvars n'est pas dans Git)
+│   └── .terraform.lock.hcl       versions exactes des providers
+├── k8s/                          manifestes Kubernetes "bruts" (première étape)
+└── helm/guestbook/               le chart Helm
+    ├── Chart.yaml                nom et version du chart
+    ├── values.yaml               valeurs par défaut (toutes commentées)
+    ├── values-dev.yaml           ce qui change pour dev
+    ├── values-staging.yaml       ce qui change pour staging
+    ├── values-prod.yaml          ce qui change pour prod
+    ├── values-mac.yaml           en plus, seulement sur un Mac à puce Apple (voir 5.1)
+    ├── charts/                   vide (pas de dépendances)
+    └── templates/
+        ├── _helpers.tpl          fonctions pour les noms et les labels
+        ├── NOTES.txt             message affiché après l'installation
+        └── ...                   un fichier par objet Kubernetes (9 fichiers)
 ```
 
-Les répertoires générés `.terraform/` et `helm/packages/`, le vrai `terraform.tfvars`, les fichiers `*.tfstate` et les identifiants sont exclus du dépôt.
+Le dossier `k8s/` a servi à écrire et tester les objets sur minikube avant de faire le chart.
+Le chart Helm a été fait à partir de ces fichiers.
 
-## 4. Prérequis et accès
+## 4. Prérequis
 
-**Poste de référence :** Windows 11, PowerShell, VS Code, Git, Docker Desktop, Minikube, `kubectl`, Helm, Terraform, Google Cloud CLI et `gke-gcloud-auth-plugin`.
+### Outils
 
-Versions observées pendant la réalisation : Terraform **1.16.6**, Docker **29.9.2**, Kubernetes Minikube **v1.37.0**, Helm **4.3.1**. Les versions de providers sont fixées dans `terraform/.terraform.lock.hcl` ; vérifier ce fichier lors de la reprise.
+| Outil | Version qu'on a utilisée |
+|---|---|
+| Git | 2.x |
+| Terraform | 1.16.6 (il faut au moins 1.3) |
+| gcloud (Google Cloud CLI) | récente |
+| gke-gcloud-auth-plugin | récente |
+| kubectl | 1.30 ou plus |
+| Helm | 4.3.1 (Helm 3 marche aussi) |
+| Docker Desktop | 29.9.2 |
+| minikube | 1.37.0 |
 
-```powershell
-# Depuis un nouveau poste : cloner un dépôt privé avec son compte GitHub autorisé.
-git clone https://github.com/ahmedjer/livre-or-cloud.git
-cd .\livre-or-cloud
+Le plus simple pour la partie cloud est d'utiliser **Cloud Shell** (dans la console du lab) :
+gcloud, kubectl, Helm et Terraform y sont déjà installés.
 
-# Vérifier les outils.
-docker version
-minikube version
-kubectl version --client
-helm version
-terraform version
-gcloud.cmd version
+Le plugin `gke-gcloud-auth-plugin` permet à kubectl de s'authentifier sur GKE. Pour l'installer
+et vérifier :
+
+```bash
+gcloud components install gke-gcloud-auth-plugin
+# si gcloud a été installé avec apt :
+#   sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
 gke-gcloud-auth-plugin --version
 ```
 
-**Sous PowerShell**, préférer `gcloud.cmd` si l’exécution de `gcloud.ps1` est bloquée par l’Execution Policy. Pour le cloud, n’utiliser **que le projet et l’identité temporaires autorisés du laboratoire**, jamais un compte personnel facturé sans accord.
+### Comptes
 
-## 5. Recréer l’environnement local Minikube (PowerShell)
+- Cloud : le compte étudiant donné par le lab Google Skills
+  (https://www.skills.google/paths/11/course_templates/2/labs/619578). Jamais un compte perso.
+- GitHub : accès au dépôt.
+- Local : Docker Desktop. `minikube tunnel` peut demander le mot de passe administrateur.
 
-> Les commandes suivantes s’appliquent à un **nouveau cluster**. Si les releases existent déjà, ne pas relancer `helm install` : consulter les commandes d’exploitation § 7.
+### Contraintes du lab
 
-### 5.1 Démarrer et vérifier Minikube
+- **Le temps est limité** : tout est supprimé à la fin de la session. Le `terraform apply` prend
+  environ 10 minutes et le `destroy` autant. Il faut lancer `terraform apply` dès le début.
+- **Le projet change à chaque session** : on met le `project_id` et la `region` du lab dans
+  `terraform/terraform.tfvars`, jamais dans le code.
+- Le 02/11, le premier `apply` a échoué parce qu'il n'y avait plus assez de ressources dans
+  `us-central1`. On a relancé et ça a marché.
 
-Démarrer **Docker Desktop**, puis :
+### Windows / PowerShell
 
-```powershell
+Les commandes sont écrites pour bash (Cloud Shell, Linux, Mac). Sous PowerShell : remplacer le
+`\` en fin de ligne par un accent grave `` ` ``, et utiliser `gcloud.cmd` si `gcloud` est bloqué.
+
+## 5. Tout déployer de zéro
+
+On lance toutes les commandes depuis la racine du dépôt :
+
+```bash
+git clone https://github.com/ahmedjer/livre-or-cloud.git
+cd livre-or-cloud
+```
+
+### 5.1 En local avec minikube
+
+1) Démarrer minikube (Docker Desktop doit être lancé) :
+
+```bash
 minikube start --driver=docker
 kubectl config use-context minikube
-kubectl config current-context
-kubectl get nodes
-kubectl get storageclass
+kubectl get nodes            # minikube doit être Ready
+kubectl get storageclass     # on doit voir "standard (default)"
 ```
 
-Résultat attendu : nœud `minikube` **Ready** et une StorageClass par défaut (`standard` sur l’environnement de référence).
+2) Vérifier le chart :
 
-### 5.2 Vérifier et déployer le chart
-
-```powershell
-helm lint .\helm\guestbook -f .\helm\guestbook\values-dev.yaml
-helm lint .\helm\guestbook -f .\helm\guestbook\values-staging.yaml
-helm lint .\helm\guestbook -f .\helm\guestbook\values-prod.yaml
-
-# Sur un cluster neuf, utiliser le nom de release comme sélecteur dev.
-# L'override guestbook du fichier values-dev.yaml sert UNIQUEMENT
-# à la migration historique des Deployments dev existants.
-helm install stack-dev .\helm\guestbook `
-  -n dev --create-namespace `
-  -f .\helm\guestbook\values-dev.yaml `
-  --set-string selectorInstanceOverride= `
-  --wait --timeout 10m
-
-helm install stack-staging .\helm\guestbook `
-  -n staging --create-namespace `
-  -f .\helm\guestbook\values-staging.yaml `
-  --wait --timeout 10m
-
-helm install stack-prod .\helm\guestbook `
-  -n prod --create-namespace `
-  -f .\helm\guestbook\values-prod.yaml `
-  --wait --timeout 10m
+```bash
+helm lint helm/guestbook -f helm/guestbook/values-dev.yaml
+helm lint helm/guestbook -f helm/guestbook/values-staging.yaml
+helm lint helm/guestbook -f helm/guestbook/values-prod.yaml
+# résultat attendu : "0 chart(s) failed"
 ```
 
-Attendu : 3 releases `deployed`, Deployments prêts et PVC `Bound`.
+3) Installer les 3 environnements. `--create-namespace` crée le namespace s'il n'existe pas.
 
-```powershell
-helm list -A
-kubectl get deployments -n dev
-kubectl get deployments -n staging
-kubectl get deployments -n prod
-kubectl get pvc -A
-kubectl get svc,endpoints -n dev
+```bash
+kubectl config current-context      # doit afficher minikube
+
+helm install stack-dev helm/guestbook -n dev --create-namespace \
+  -f helm/guestbook/values-dev.yaml --wait
+
+helm install stack-staging helm/guestbook -n staging --create-namespace \
+  -f helm/guestbook/values-staging.yaml --wait
+
+helm install stack-prod helm/guestbook -n prod --create-namespace \
+  -f helm/guestbook/values-prod.yaml --wait
+
+helm list -A                        # les 3 releases en "deployed"
+kubectl get deploy,svc,pvc -n prod  # les deployments prêts, le PVC en "Bound"
 ```
 
-### 5.3 Accéder à l’interface Web
+**Sur un Mac à puce Apple (M1, M2...)**, les images du frontend et du follower de Google ne
+sont faites que pour les puces Intel/AMD (erreur `exec format error`). Il faut :
 
-Dans **un autre terminal PowerShell**, laisser tourner :
+- une fois après chaque démarrage de Docker Desktop, installer l'émulateur Intel :
+  `docker run --privileged --rm tonistiigi/binfmt --install amd64` (ça suffit pour le frontend) ;
+- ajouter `-f helm/guestbook/values-mac.yaml` à chaque commande `helm install` / `helm upgrade`,
+  par exemple :
 
-```powershell
+  ```bash
+  helm install stack-dev helm/guestbook -n dev --create-namespace \
+    -f helm/guestbook/values-dev.yaml -f helm/guestbook/values-mac.yaml --wait
+  ```
+
+  Redis plante quand il est émulé (`Segmentation fault`), donc ce fichier remplace l'image du
+  follower par l'image Redis officielle, avec la même commande. Sur GKE et sur un PC Windows, on
+  ne l'utilise pas.
+
+4) Accéder au site. Dans un **autre terminal**, lancer et laisser tourner :
+
+```bash
 minikube tunnel
 ```
 
-Puis consulter les Services et les URL locales constatées sur le poste de référence :
+Puis ouvrir dans le navigateur :
 
-```powershell
-kubectl get svc frontend -n dev
-kubectl get svc frontend -n staging
-kubectl get svc frontend -n prod
+- dev : http://127.0.0.1:8080
+- staging : http://127.0.0.1:8081
+- prod : http://127.0.0.1:8082
+
+Chaque environnement a son port, sinon les 3 se battraient pour le même port sur 127.0.0.1.
+Un message écrit en dev n'apparaît pas en prod : chaque environnement a son propre Redis.
+
+### 5.2 Sur le cloud avec GKE
+
+1) Démarrer le lab et ouvrir Cloud Shell. Vérifier le projet :
+
+```bash
+gcloud config set project <PROJECT_ID_DU_LAB>
+gcloud config get-value project
 ```
 
-- Dev : **http://127.0.0.1:8080**
-- Staging : **http://127.0.0.1:8081**
-- Prod : **http://127.0.0.1:8082**
+2) Créer le fichier de variables :
 
-Ces adresses nécessitent `minikube tunnel` et dépendent du réseau local. Alternative sans tunnel :
-
-```powershell
-kubectl port-forward -n dev svc/frontend 18080:8080
-# Ouvrir http://127.0.0.1:18080 dans le navigateur.
+```bash
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# ouvrir terraform/terraform.tfvars et mettre le project_id et la region du lab
 ```
 
-### 5.4 Pourquoi `values-dev.yaml` a une surcharge spéciale
+3) Créer le cluster :
 
-Le `dev` historique était initialement géré par `kubectl apply` avec des sélecteurs immuables `app.kubernetes.io/instance=guestbook`. Lors de son adoption par `stack-dev`, le chart a reçu `selectorInstanceOverride: guestbook` pour **préserver les Deployments et le PVC existants**. Sur **un cluster neuf**, passer `--set-string selectorInstanceOverride=` pour obtenir `stack-dev` comme valeur du sélecteur. Conserver cet override sur les futurs `helm upgrade` du `dev` créé ainsi, afin d’éviter de modifier un selector immuable.
-
-**Ne jamais exécuter `kubectl delete -f k8s/` sur l’environnement historique :** le dossier contient un PVC et cela pourrait supprimer les données.
-
-## 6. Infrastructure cloud GKE — procédure préparée, non validée
-
-**Statut : non exécuté** (compte Google Skills suspendu le 1er novembre 2026). Le laboratoire prévu est [Google Skills](https://www.skills.google/paths/11/course_templates/2/labs/619578). Il faut un accès valide, une durée de session adaptée, un projet autorisant GKE Autopilot et les APIs nécessaires. La région et le Project ID ne doivent jamais être inventés : ils sont fournis par le laboratoire à chaque session.
-
-### 6.1 Terraform : module, providers et variables
-
-Module **imposé** : `terraform-google-modules/kubernetes-engine/google//modules/beta-autopilot-public-cluster` version `~> 46.0` (version `46.0.0` récupérée lors de l’initialisation). `main.tf` ne définit pas directement de ressource `google_container_cluster`.
-
-| Variable | Type | Obligatoire | Par défaut / règle |
-|---|---|---|---|
-| `project_id` | string | Oui | ID temporaire du laboratoire |
-| `cluster_name` | string | Non | `autopilot-cluster-1` |
-| `region` | string | Oui | Région fournie / autorisée par le laboratoire |
-| `network` | string | Non | `default` |
-| `subnetwork` | string | Non | `default` |
-| `ip_range_pods` | string ou null | Non | `null` |
-| `ip_range_services` | string ou null | Non | `null` |
-| `release_channel` | string | Non | `REGULAR` |
-| `deletion_protection` | bool | Non | `false` (pour la destruction du lab) |
-
-**Providers déclarés** dans `versions.tf` : `hashicorp/google` (`~> 8.0`), `hashicorp/google-beta` (`~> 8.0`), `hashicorp/kubernetes` (`~> 2.0`), `hashicorp/random` (`~> 3.0`). Les versions exactes de la machine sont verrouillées dans `.terraform.lock.hcl` (reproductibilité), et peuvent différer d’une nouvelle installation après mise à jour explicite du lock.
-
-**Outputs** dans `outputs.tf` : `cluster_name`, `cluster_id`, `cluster_location`, `project_id`, `cluster_endpoint` (**sensitive**), `kubernetes_version`, `release_channel` et `gke_connection_command`. Le résultat `terraform output -raw gke_connection_command` est une commande de connexion prévue pour l’exploitation.
-
-**State :** état Terraform **local** dans cet exercice éphémère, ignoré par Git, non partagé. Limites : sauvegarde et collaboration difficiles, risque de divergence/perte du state. Pour une exploitation réelle : backend distant sécurisé (par exemple GCS), contrôle d’accès et verrouillage.
-
-### 6.2 Authentification au laboratoire et création du cluster
-
-> Exécuter **uniquement après rétablissement de l’accès Google Skills**. L’authentification GCP locale et l’ADC doivent utiliser **l’identité temporaire autorisée**. Ne jamais transmettre des jetons, mots de passe ou fichiers JSON dans Git ou les preuves.
-
-```powershell
-# S'assurer de travailler avec le projet GCP temporaire autorisé.
-gcloud.cmd auth login
-gcloud.cmd auth application-default login
-gcloud.cmd auth list
-
-# Créer la configuration locale NON versionnée, après avoir relevé
-# project_id et region dans le panneau du laboratoire.
-Copy-Item .\terraform\terraform.tfvars.example .\terraform\terraform.tfvars
-code .\terraform\terraform.tfvars
-
-# Renseigner les valeurs REPLACE_WITH_LAB_PROJECT_ID et
-# REPLACE_WITH_LAB_REGION, puis vérifier le projet actif.
-# Utiliser ici les valeurs relevées dans le laboratoire.
-$ProjectId = Read-Host 'Project ID du lab'
-gcloud.cmd config set project $ProjectId
-
-terraform -chdir=terraform init
-terraform -chdir=terraform fmt -check
-terraform -chdir=terraform validate
-terraform -chdir=terraform plan
-terraform -chdir=terraform apply
-
-# Vérifier les outputs et l'idempotence (attendu : No changes).
-terraform -chdir=terraform output
-terraform -chdir=terraform plan
+```bash
+terraform -chdir=terraform init       # télécharge le module et les providers
+terraform -chdir=terraform validate   # "Success! The configuration is valid."
+terraform -chdir=terraform plan       # 7 ressources à créer
+terraform -chdir=terraform apply      # taper "yes", environ 10 minutes
+terraform -chdir=terraform plan       # doit afficher "No changes"
+terraform -chdir=terraform output     # nom du cluster, région, commande de connexion...
 ```
 
-`terraform apply` nécessite confirmation de l’opérateur. Si GKE ne peut pas être créé (APIs, quotas, permissions ou réseau `default` indisponible), **ne pas changer silencieusement le module imposé** : documenter le blocage et contacter l’administrateur du laboratoire.
+Si Terraform dit que l'API Kubernetes Engine n'est pas activée :
+`gcloud services enable container.googleapis.com` puis relancer `apply`.
 
-Les ressources effectivement créées (cluster et ressources associées au module) doivent être relevées par `terraform state list` **après** un `apply` réussi ; elles ne sont pas inventoriées tant que le cloud n’a pas été testé.
+4) Se connecter au cluster :
 
-### 6.3 Connexion et déploiement Helm sur GKE
-
-```powershell
-$ProjectId   = terraform -chdir=terraform output -raw project_id
-$Region      = terraform -chdir=terraform output -raw cluster_location
-$ClusterName = terraform -chdir=terraform output -raw cluster_name
-
+```bash
 gke-gcloud-auth-plugin --version
-gcloud.cmd container clusters get-credentials $ClusterName `
-  --location $Region --project $ProjectId
-kubectl config current-context
+gcloud container clusters get-credentials autopilot-cluster-1 \
+  --location <REGION> --project <PROJECT_ID>
+# (c'est la commande donnée par : terraform -chdir=terraform output gke_connection_command)
+
+kubectl config current-context   # gke_<projet>_<region>_autopilot-cluster-1
 kubectl cluster-info
-kubectl get nodes
+kubectl get namespaces
 ```
 
-**Contrôle obligatoire :** le contexte doit être celui du GKE autorisé et **pas** `minikube` avant chaque commande Helm. Sur un cluster **neuf** :
+Pour passer de GKE à minikube (ou l'inverse) : `kubectl config get-contexts` puis
+`kubectl config use-context <nom>`. **Toujours vérifier le contexte avant une commande Helm.**
 
-```powershell
-# Phase 1 : accès privé ClusterIP, test par port-forward.
-helm install stack-dev .\helm\guestbook `
-  -n dev --create-namespace `
-  -f .\helm\guestbook\values-dev.yaml `
-  --set-string selectorInstanceOverride= `
-  --set frontend.service.type=ClusterIP `
-  --wait --timeout 15m
+5) Installer dev en ClusterIP pour tester sans ouvrir sur Internet :
 
-kubectl get pods,svc,pvc -n dev
-kubectl port-forward -n dev svc/frontend 18080:8080
-# Dans le navigateur : http://127.0.0.1:18080
+```bash
+helm install stack-dev helm/guestbook -n dev --create-namespace \
+  -f helm/guestbook/values-dev.yaml \
+  --set frontend.service.type=ClusterIP --wait --timeout 15m
+
+kubectl get deploy,svc,pvc -n dev    # svc/frontend en ClusterIP, PVC en Bound
+kubectl port-forward svc/frontend 18080:8080 -n dev
 ```
 
-Arrêter le port-forward avec `Ctrl+C` après validation, puis :
+Ouvrir http://127.0.0.1:18080 (dans Cloud Shell : bouton *Web Preview*, changer le port en
+18080) et écrire quelques messages. Arrêter avec `Ctrl+C`.
 
-```powershell
-# Phase 2 : ouverture publique par Helm (peut provisionner une IP externe).
-helm upgrade stack-dev .\helm\guestbook `
-  -n dev -f .\helm\guestbook\values-dev.yaml `
-  --set-string selectorInstanceOverride= `
-  --set frontend.service.type=LoadBalancer `
-  --wait --timeout 15m
+Au début, les pods peuvent rester quelques minutes en `Pending` : Autopilot crée les machines au
+moment où on en a besoin. C'est normal.
 
-kubectl get svc frontend -n dev
+6) Ouvrir sur Internet (LoadBalancer). On relance la commande sans le `--set`, donc on revient à
+la valeur du fichier `values-dev.yaml` qui est `LoadBalancer` :
 
-# Les 2 autres environnements (chart et valeurs identiques au local).
-helm install stack-staging .\helm\guestbook `
-  -n staging --create-namespace `
-  -f .\helm\guestbook\values-staging.yaml `
-  --wait --timeout 15m
+```bash
+helm upgrade stack-dev helm/guestbook -n dev \
+  -f helm/guestbook/values-dev.yaml --wait --timeout 15m
 
-helm install stack-prod .\helm\guestbook `
-  -n prod --create-namespace `
-  -f .\helm\guestbook\values-prod.yaml `
-  --wait --timeout 15m
-
-helm list -A
-kubectl get pvc -A
+kubectl get svc frontend -n dev -w   # attendre l'EXTERNAL-IP puis Ctrl+C
 ```
 
-Les Services `LoadBalancer` GKE peuvent engendrer des coûts et des délais de création. Surveiller les quotas et respecter les instructions du laboratoire.
+Ouvrir `http://<EXTERNAL-IP>:8080` : les messages de l'étape 5 sont toujours là.
 
-### 6.4 Tester persistance et idempotence sur GKE
+7) Installer staging et prod :
 
-Sur le cluster GKE **uniquement**, avec un environnement de test autorisé :
+```bash
+helm install stack-staging helm/guestbook -n staging --create-namespace \
+  -f helm/guestbook/values-staging.yaml --wait --timeout 15m
 
-```powershell
-# Enregistrer un marqueur, vérifier la lecture via le follower.
-kubectl exec -n prod deployment/redis-leader -- redis-cli SET persistence_test hello
-kubectl exec -n prod deployment/redis-follower -- redis-cli GET persistence_test
+helm install stack-prod helm/guestbook -n prod --create-namespace \
+  -f helm/guestbook/values-prod.yaml --wait --timeout 15m
 
-# Vérifier le PVC et la configuration Redis.
-kubectl get pvc -n prod
-kubectl exec -n prod deployment/redis-leader -- redis-cli CONFIG GET appendonly
-
-# Après sauvegarde/accord d'opération : identifier le Pod à redémarrer.
-$LeaderPod = kubectl get pods -n prod `
-  -l app.kubernetes.io/component=redis-leader `
-  -o jsonpath='{.items[0].metadata.name}'
-# Test contrôlé : interrompt temporairement les écritures.
-kubectl delete pod $LeaderPod -n prod
-kubectl rollout status deployment/redis-leader -n prod --timeout=300s
-kubectl exec -n prod deployment/redis-leader -- redis-cli GET persistence_test
-
-# Idempotence Terraform après un apply.
-terraform -chdir=terraform plan
-# Attendu : No changes.
+helm list -A                 # les 3 releases en "deployed"
+kubectl get svc frontend -A  # une IP publique par environnement
 ```
 
-Pour l’idempotence Helm, comparer les Pods et leurs UID avant/après un `helm upgrade` sans changement de valeurs ni de version de chart. Une nouvelle **révision Helm** peut apparaître sans recréation des Pods : ne pas confondre historique Helm et changement de workload.
+8) À la fin de la session : voir le runbook R10 (désinstaller puis `terraform destroy`).
 
-### 6.5 Nettoyage cloud (risque de destruction)
+### 5.3 Tester les manifestes k8s/ (optionnel)
 
-**Uniquement sur le cluster GKE de laboratoire**, après validation du contexte, accord de destruction et **sauvegarde externe** des données :
+Les fichiers de `k8s/` sont la version "sans Helm". Pour les tester, on utilise un namespace à
+part, sinon ils entrent en conflit avec les objets créés par Helm (mêmes noms de Services).
 
-```powershell
-kubectl config current-context
+```bash
+kubectl create namespace k8s-test
+for f in k8s/*.yaml; do
+  [ "$f" = k8s/namespaces.yaml ] || kubectl apply -n k8s-test -f "$f"
+done
+kubectl get all,cm,pvc -n k8s-test
+kubectl delete namespace k8s-test
+```
+
+On ne passe pas `namespaces.yaml` parce qu'il crée dev, staging et prod, qui sont gérés par Helm.
+
+### 5.4 Mettre à jour un minikube installé avec l'ancien chart (0.1.x)
+
+Les noms des objets ont changé en 0.2.0. Un simple `helm upgrade` créerait un nouveau volume
+vide. Sur minikube on n'a que des données de test, donc le plus simple est de tout réinstaller :
+
+```bash
+kubectl config current-context    # minikube
 helm uninstall stack-dev -n dev
 helm uninstall stack-staging -n staging
 helm uninstall stack-prod -n prod
-kubectl get pvc -A
+for e in dev staging prod; do kubectl delete pvc redis-leader-pvc -n $e --ignore-not-found; done
+# les anciens objets créés avec kubectl apply dans dev :
+kubectl delete deploy,svc,cm -n dev -l app.kubernetes.io/instance=guestbook --ignore-not-found
 ```
 
-Le chart **0.1.1** prévoit `helm.sh/resource-policy: keep` sur le PVC. Les PVC conservés peuvent persister après désinstallation ; leur suppression détruit potentiellement les données et doit faire l’objet d’une décision explicite et d’un contrôle des ressources cloud restantes. **Les releases historiques Minikube installées en chart 0.1.0 ne doivent pas être désinstallées sans vérification préalable de leur politique de rétention PVC.**
+Puis refaire l'étape 3 du 5.1.
 
-Après traitement des ressources conservées et vérification du projet/cluster visé :
+## 6. Exploitation
 
-```powershell
-terraform -chdir=terraform destroy
-```
+Toutes les procédures sont dans [docs/runbooks.md](docs/runbooks.md) :
 
-Ce scénario de destruction GKE n’a pas encore été exécuté.
+| Besoin | Runbook |
+|---|---|
+| Vérifier qu'un environnement va bien | R1 |
+| Déployer une nouvelle version | R2 |
+| Revenir à la version d'avant | R3 |
+| Changer la configuration d'un environnement | R4 |
+| Plus de pods ou plus de ressources | R5 |
+| Agrandir le volume | R6 |
+| Vérifier que les données sont bien sauvegardées | R7 |
+| Passer le frontend de ClusterIP à LoadBalancer (et l'inverse) | R8 |
+| Se reconnecter depuis un autre PC | R9 |
+| Tout désinstaller et détruire le cluster | R10 |
+| Chercher une panne | R11 |
+| Faire une sauvegarde de Redis | R12 |
 
-## 7. Exploitation courante (résumé)
+Trois règles :
 
-**La documentation opératoire détaillée est dans [docs/runbooks.md](docs/runbooks.md).** Vérifier systématiquement `kubectl config current-context` avant les commandes suivantes.
+1. vérifier `kubectl config current-context` avant chaque commande ;
+2. on modifie l'application **uniquement avec Helm** (pas de `kubectl apply` ou `kubectl edit`
+   sur les objets du chart) ;
+3. un changement qui doit rester se fait dans un fichier `values-<ENV>.yaml` et on le commit.
 
-| Opération | Commandes de référence | Vérification |
+## 7. Référence Terraform et Helm
+
+### 7.1 Terraform
+
+Module utilisé : `terraform-google-modules/kubernetes-engine/google//modules/beta-autopilot-public-cluster`,
+version `~> 46.0` (la 46.0.0 est installée). Dans `main.tf` on ne passe que les arguments
+demandés : `source`, `version`, `project_id`, `name`, `region`, `network`, `subnetwork`,
+`ip_range_pods`, `ip_range_services`, `release_channel`, `deletion_protection`.
+
+**Ce que Terraform crée** (vu avec `terraform state list` après le apply) :
+
+| Ressource | À quoi ça sert |
+|---|---|
+| `google_container_cluster.primary` | le cluster GKE Autopilot `autopilot-cluster-1` |
+| `google_service_account.cluster_service_account` | le compte de service utilisé par les nœuds |
+| `google_project_iam_member` (3 fois) | les droits de ce compte : `container.defaultNodeServiceAccount`, `monitoring.metricWriter`, `stackdriver.resourceMetadata.writer` |
+| `random_string.cluster_service_account_suffix` | un suffixe aléatoire pour le nom du compte de service |
+| `random_shuffle.available_zones` | le choix des zones dans la région |
+
+Pas de réseau ni de règle de firewall créés : on utilise le réseau `default` qui existe déjà.
+
+**Variables** :
+
+| Nom | Description | Type | Par défaut | Obligatoire |
+|---|---|---|---|---|
+| `project_id` | ID du projet du lab | string | - | oui |
+| `region` | région du lab, par exemple `us-central1` (vérifiée) | string | - | oui |
+| `cluster_name` | nom du cluster | string | `autopilot-cluster-1` | non |
+| `network` | réseau VPC | string | `default` | non |
+| `subnetwork` | sous-réseau | string | `default` | non |
+| `ip_range_pods` | plage IP des pods (null = automatique) | string | `null` | non |
+| `ip_range_services` | plage IP des services (null = automatique) | string | `null` | non |
+| `release_channel` | canal de mise à jour (RAPID, REGULAR ou STABLE) | string | `REGULAR` | non |
+| `deletion_protection` | protection contre la suppression | bool | `false` | non |
+
+**Providers** (dans `versions.tf`) :
+
+| Provider | Contrainte | Version installée |
 |---|---|---|
-| État global | `helm list -A`, `kubectl get pods -A`, `kubectl get pvc -A` | Releases `deployed`, Pods Ready, PVC Bound |
-| Diagnostiquer | `kubectl describe deployment redis-leader -n dev`, `kubectl get events -n dev`, `kubectl logs -n dev deployment/redis-leader` | Identifier événements et erreurs |
-| Config Helm | `helm get values stack-staging -n staging`, consulter `values-staging.yaml` | Valeurs cohérentes |
-| Scale frontend | `helm upgrade ... --set frontend.replicaCount=3` | `kubectl get deployment frontend -n staging` |
-| Rollback | `helm history stack-staging -n staging`, `helm rollback stack-staging <REV> -n staging` | Ancienne configuration restaurée |
-| Redis | `kubectl exec -n dev deployment/redis-leader -- redis-cli PING` | `PONG` |
-| Réplication | `kubectl exec -n dev deployment/redis-follower -- redis-cli INFO replication` | `master_link_status:up` |
-| Persistance | `kubectl get pvc -n dev`, Redis `CONFIG GET appendonly` | PVC `Bound`, AOF `yes` |
-| Agrandir PVC | Vérifier `allowVolumeExpansion` de la StorageClass ; modifier valeurs/chart via Helm | PVC `Bound` avec nouvelle capacité ; ne jamais réduire |
-| Switch cluster | `kubectl config get-contexts` puis `kubectl config use-context <CONTEXT>` | `kubectl config current-context` exact |
+| hashicorp/google | `~> 8.0` | 8.9.0 |
+| hashicorp/google-beta | `~> 8.0` | 8.9.0 |
+| hashicorp/kubernetes | `~> 2.0` | 2.38.0 |
+| hashicorp/random | `~> 3.0` | 3.9.1 |
 
-**Exemple upgrade sur staging**, depuis la racine (sur le cluster voulu) :
+On a vérifié que ces versions sont compatibles avec celles demandées par le module
+(google et google-beta entre 7.28 et 9, kubernetes entre 2.10 et 4).
 
-```powershell
-helm upgrade stack-staging .\helm\guestbook `
-  -n staging -f .\helm\guestbook\values-staging.yaml `
-  --set frontend.replicaCount=3 --wait --timeout 10m
-helm history stack-staging -n staging
-kubectl get deployment frontend -n staging
-```
+**Outputs** :
 
-**Retour arrière** : consulter `helm history` et sélectionner la révision stable :
-
-```powershell
-helm rollback stack-staging 1 -n staging --wait --timeout 10m
-```
-
-**Attention :** `1` est la révision testée lors du projet local ; sur une installation différente, sélectionner la révision correspondante dans l’historique. Sur Minikube, les données Redis ont été préservées pendant l’upgrade et le rollback.
-
-### Sauvegarde, restauration et conservation
-
-Le PVC protège contre certains redémarrages de Pod mais **n’est pas une sauvegarde indépendante**. Une copie de `dump.rdb` et de `appendonly.aof` a été effectuée hors du dépôt lors du test local. La **restauration complète n’est pas encore testée** et ne doit pas être présentée comme validée. Ne jamais utiliser `kubectl delete pvc` pour résoudre un échec de montage sans décision explicite.
-
-## 8. Référence de configuration Helm
-
-Le chart a une version source **0.1.1**, tandis que les trois releases locales installées affichent encore **0.1.0** : la modification de `Chart.yaml` ne met pas à jour les releases automatiquement.
-
-| Paramètre / composant | Valeur / comportement | Portée |
+| Output | Contenu | Exemple |
 |---|---|---|
-| `frontend.replicaCount` | 1 / 2 / 3 | Dev / staging / prod |
-| `frontend.service.type` | `LoadBalancer` en local, surcharge `ClusterIP` puis `LoadBalancer` dans GKE | Type d’exposition |
-| Port frontend | 8080 / 8081 / 8082 | Services locaux distincts |
-| Redis Follower | 1 / 2 / 2 réplicas | Dev / staging / prod |
-| Redis Leader | 1 réplique `Recreate`, AOF | Dans chaque namespace |
-| PVC Redis Leader | 1 GiB / 1 GiB / 2 GiB | Dev / staging / prod |
-| `selectorInstanceOverride` | `guestbook` dans les valeurs dev historiques ; vide pour toute installation neuve | Compatibilité avec sélecteur immutable |
+| `cluster_name` | nom du cluster | `autopilot-cluster-1` |
+| `cluster_location` | région | `us-central1` |
+| `project_id` | projet | `qwiklabs-gcp-xx-xxxx` |
+| `cluster_id` | identifiant complet | `projects/qwiklabs-gcp-xx-xxxx/locations/us-central1/clusters/autopilot-cluster-1` |
+| `cluster_endpoint` | adresse de l'API (cachée) | `<sensitive>`, à lire avec `terraform output -raw cluster_endpoint` |
+| `kubernetes_version` | version de Kubernetes | `1.36.4-gke.2046003` |
+| `release_channel` | canal appliqué | `REGULAR` |
+| `gke_connection_command` | commande pour connecter kubectl | `gcloud container clusters get-credentials autopilot-cluster-1 --location us-central1 --project qwiklabs-gcp-xx-xxxx` |
 
-L’inventaire **exhaustif des clés Helm**, leurs valeurs par défaut et leurs commentaires se trouve dans [`helm/guestbook/values.yaml`](helm/guestbook/values.yaml) et les fichiers `values-<ENV>.yaml`. Vérification :
+Commandes : `terraform -chdir=terraform init`, `plan`, `apply`, `output`, `destroy`.
 
-```powershell
-helm show values .\helm\guestbook
-helm template stack-dev .\helm\guestbook -n dev `
-  -f .\helm\guestbook\values-dev.yaml `
-  --set-string selectorInstanceOverride= `
-  --set frontend.service.type=ClusterIP
-```
+Le state Terraform est en local (voir decisions.md, D10). Après un `apply`, `plan` affiche bien
+`No changes` (testé le 02/11).
 
-Les images ont des versions explicites ; aucun tag `latest` n’est utilisé.
+### 7.2 Objets créés par le chart
 
-## 9. Preuves et contrôles effectués en local
+Pour chaque environnement : 3 Deployments, 3 Services, 2 ConfigMaps et 1 PVC. La liste avec les
+noms est dans [docs/architecture.md](docs/architecture.md#2-les-objets-dune-release).
 
-Les sorties texte sont stockées dans [`docs/evidence/`](docs/evidence/) : Helm releases, Deployments, Services, PVC pour les trois environnements, historique du rollback et état Redis.
+### 7.3 Valeurs Helm
 
-Résultats relevés sur Minikube :
+Chaque valeur est expliquée dans [values.yaml](helm/guestbook/values.yaml). Dans le tableau, "-"
+veut dire qu'on garde la valeur par défaut. Pour les ressources on note
+`requests cpu/mémoire puis limits cpu/mémoire`.
 
-- `stack-dev`, `stack-staging`, `stack-prod` au statut **deployed**.
-- Réplicas frontend **1/2/3**, followers **1/2/2**, leader **1** dans chaque namespace.
-- Trois PVC **Bound** (1 GiB, 1 GiB et 2 GiB).
-- Historique staging **revision 1 install → 2 upgrade → 3 rollback vers 1**.
-- La clé `persistence_test` conserve la valeur **`hello`** après redémarrage de Minikube.
-- `redis-cli INFO replication` indique **`master_link_status:up`**.
-- `redis-cli CONFIG GET appendonly` renvoie **`yes`**.
+| Valeur | Rôle | Défaut | dev | staging | prod |
+|---|---|---|---|---|---|
+| `commonLabels.environment` | label environment | dev | dev | staging | prod |
+| `commonLabels.team` | label team | platform | - | - | - |
+| `frontend.replicaCount` | nombre de pods frontend | 1 | 1 | 2 | 3 |
+| `frontend.image.repository` / `tag` | image du frontend | gb-frontend / v5 | - | - | - |
+| `frontend.env.GET_HOSTS_FROM` | comment le frontend trouve Redis | dns | - | - | - |
+| `frontend.service.name` | nom du Service | frontend | - | - | - |
+| `frontend.service.type` | type du Service | LoadBalancer | LoadBalancer | LoadBalancer | LoadBalancer |
+| `frontend.service.port` | port du Service | 8080 | 8080 | 8081 | 8082 |
+| `frontend.resources` | CPU / mémoire | 100m/128Mi puis 250m/256Mi | 50m/64Mi puis 200m/128Mi | - | 150m/192Mi puis 300m/384Mi |
+| `frontend.readinessProbe` | délai, période, timeout, échecs | 5s, 5s, 3s, 3 | - | - | - |
+| `frontend.livenessProbe` | délai, période, timeout, échecs | 15s, 10s, 3s, 3 | - | - | - |
+| `redisLeader.replicaCount` | toujours 1 | 1 | - | - | - |
+| `redisLeader.image.repository` / `tag` | image Redis | redis / 6.0.5 | - | - | - |
+| `redisLeader.service.name` / `port` | Service du leader (nom à ne pas changer) | redis-leader / 6379 | - | - | - |
+| `redisLeader.persistence.size` | taille du volume | 1Gi | 1Gi | 1Gi | 2Gi |
+| `redisLeader.persistence.accessMode` | mode d'accès du volume | ReadWriteOnce | - | - | - |
+| `redisLeader.persistence.storageClass` | vide = classe par défaut | "" | - | - | - |
+| `redisLeader.redisConfig` | contenu de redis.conf | dir /data, appendonly yes... | - | - | - |
+| `redisLeader.resources` | CPU / mémoire | 100m/128Mi puis 250m/256Mi | 50m/64Mi puis 200m/128Mi | - | 200m/256Mi puis 500m/512Mi |
+| `redisLeader.readinessProbe` / `livenessProbe` | probes | 5s, 5s, 2s, 3 / 15s, 10s, 2s, 3 | - | - | - |
+| `redisFollower.replicaCount` | nombre de followers | 1 | 1 | 2 | 2 |
+| `redisFollower.image.repository` / `tag` | image follower | gb-redis-follower / v2 | - | - | - |
+| `redisFollower.service.name` / `port` | Service des followers (nom à ne pas changer) | redis-follower / 6379 | - | - | - |
+| `redisFollower.resources` | CPU / mémoire | 100m/128Mi puis 250m/256Mi | 50m/64Mi puis 200m/128Mi | - | 150m/192Mi puis 300m/384Mi |
+| `redisFollower.readinessProbe` / `livenessProbe` | probes | 5s, 5s, 2s, 3 / 15s, 10s, 2s, 3 | - | - | - |
 
-Les captures et résultats sont **datés** ; il est normal que les identifiants et l’âge des Pods changent lors d’une nouvelle session.
+Il y a aussi `nameOverride`, `fullnameOverride` et `pullPolicy` (toujours `IfNotPresent`), qu'on
+ne change pas.
 
-## 10. Dépannage déjà rencontré
+Pour voir les valeurs utilisées par une release : `helm get values stack-<ENV> -n <ENV> --all`.
 
-| Symptôme | Cause observée / probable | Résolution non destructive |
+## 8. Nos choix techniques
+
+Les explications complètes sont dans [docs/decisions.md](docs/decisions.md). En résumé :
+
+- **Terraform pour le cluster, Helm pour l'application** : ce sont deux choses qui ne changent pas
+  au même rythme.
+- **Recreate pour le Redis leader** : son volume ne peut être utilisé que par un seul pod à la fois.
+- **Redis en mode AOF** avec écriture sur disque après chaque message : on ne perd rien.
+- **Probes** : `httpGet /` pour le frontend, `redis-cli ping` pour Redis.
+- **Ressources** plus petites en dev et plus grandes en prod.
+- **Noms des Services Redis fixes** (`redis-leader`, `redis-follower`) parce que les images les
+  utilisent en dur.
+- **StorageClass vide** : on n'écrit pas `storageClassName`, donc c'est la classe par défaut.
+- **`--set frontend.service.type=ClusterIP`** pour la phase de test sur GKE.
+- **PVC gardé** quand on fait `helm uninstall`.
+- **State Terraform en local** parce que le projet du lab est temporaire.
+
+## 9. En cas de problème
+
+Les commandes de diagnostic sont dans le runbook R11. Les problèmes qu'on a déjà eus :
+
+| Problème | Cause | Solution |
 |---|---|---|
-| `terraform init`: « There is not enough space on the disk » | C: presque plein lors du téléchargement des providers | Libérer de l’espace, nettoyer uniquement les temporaires incomplets, puis relancer `terraform init` |
-| `gcloud.ps1 cannot be loaded ... scripts is disabled` | Politique PowerShell | Utiliser **`gcloud.cmd`** plutôt que changer globalement la sécurité Windows |
-| `kubectl` : `127.0.0.1:<PORT> connection refused` | Docker Desktop / Minikube arrêtés | Vérifier Docker, `minikube status`, redémarrer le profil existant puis `minikube update-context` |
-| `Docker Desktop is unable to start` | Docker Engine indisponible | Démarrer Docker Desktop et diagnostiquer WSL/espace disque ; ne pas réinitialiser les volumes |
-| `helm install`: resource already exists / immutable Deployment selector | Anciennes ressources `kubectl apply` sur `dev` | Migration documentée via `--take-ownership` et sélecteur compatible ; ne pas supprimer le PVC |
-| `Pending PVC` | Provisioner / StorageClass non disponibles ou quotas | `kubectl get storageclass`, `kubectl describe pvc`, `kubectl get events` |
-| Redis follower déconnecté | Réseau ou Service `redis-leader` indisponible | `kubectl get endpoints`, logs Redis, `INFO replication` |
-| Google Skills : « compte suspendu » | Accès labo suspendu, cause non établie | Contacter le support ou l’administrateur ; **ne pas déclarer le déploiement GKE réussi** |
+| `terraform apply` échoue : pas assez de ressources dans la région | GKE manquait de place dans le lab | relancer `terraform apply` |
+| `terraform init` : "not enough space on the disk" | disque plein | libérer de la place et relancer |
+| `gcloud.ps1 cannot be loaded` (PowerShell) | sécurité de PowerShell | utiliser `gcloud.cmd` |
+| `kubectl` : "connection refused" sur 127.0.0.1 | Docker Desktop ou minikube arrêté | démarrer Docker puis `minikube start` |
+| `helm install` : "resource already exists" ou "field is immutable" | des objets avaient été créés avant avec `kubectl apply` | voir 5.3 et 5.4 |
+| PVC en `Pending` | pas de StorageClass par défaut | `kubectl get storageclass`, `kubectl describe pvc -n <ENV>` |
+| Pods en `Pending` quelques minutes sur GKE | Autopilot crée les machines | attendre, `kubectl get events -n <ENV>` |
+| `EXTERNAL-IP` reste en `<pending>` en local | `minikube tunnel` pas lancé | le lancer dans un autre terminal |
+| Mac : `exec format error` dans `kubectl logs` | images faites pour les puces Intel/AMD | installer l'émulateur (voir 5.1) |
+| Mac : follower en `CrashLoopBackOff`, `Segmentation fault` dans les logs | Redis plante quand il est émulé | ajouter `-f helm/guestbook/values-mac.yaml` (voir 5.1) |
 
-Le répertoire `docs/evidence/` ne doit contenir **ni sauvegardes de bases Redis ni secrets**.
+## 10. Limites
 
-## 11. Sécurité, risques et dette technique
+Ce projet n'est pas prêt pour une vraie production :
 
-Cette plateforme est un **laboratoire pédagogique**, non une architecture de production prête pour Internet :
+- Redis n'a pas de mot de passe. Il faudrait en mettre un (dans un Secret) et limiter qui peut
+  parler à Redis.
+- Il n'y a qu'un seul Redis leader : quand il redémarre, on ne peut pas écrire pendant quelques
+  secondes. Il faudrait une solution Redis haute disponibilité.
+- Pas de HTTPS : le site est en HTTP simple.
+- Pas de sauvegarde automatique. Le volume persistant protège contre un redémarrage, pas contre une
+  suppression. La restauration n'a pas été testée.
+- Les images sont des images d'exemple de Google et Redis 6.0.5 est une vieille version.
+- Pas de monitoring ni d'alertes.
 
-- Redis sans authentification ; `protected-mode no` ne convient pas à la production.
-- Pas de TLS/HTTPS applicatif, d’Ingress sécurisé ni de gestion complète des Secrets.
-- Un Redis Leader unique reste un point de défaillance ; pas de failover Redis automatique.
-- Un PVC n’est pas une sauvegarde : définir des sauvegardes externalisées testées et un plan de restauration.
-- Ajouter des politiques réseau, RBAC strict, observabilité et politique de mises à jour d’images.
-- Tester l’expansion PVC sur la StorageClass cible avant toute modification réelle.
-- Tester GKE (quotas, permissions, coûts, provisionnement, IP publique, idempotence Terraform, nettoyage) dès rétablissement des accès.
+Ce qu'on n'a pas encore fait : le test ClusterIP puis LoadBalancer sur GKE, et le déploiement du
+chart 0.2.0 (voir partie 0).
 
-## 12. Soutenance et transfert
+## 11. Démonstration
 
-**Format prévu par l’énoncé : 30–45 minutes**, dont environ 10–15 minutes de présentation, 15 minutes de démonstration et 10–15 minutes de questions. Les intervenants doivent pouvoir expliquer et exécuter les runbooks, sans supposer que la plateforme cloud a déjà été validée.
-
-**Scénario demandé dans l’énoncé (cloud, à exécuter quand disponible) :**
-
-1. `terraform plan` après `apply` : **No changes** ; `terraform output` (cluster, région, connexion).
-2. `gke-gcloud-auth-plugin`, `get-credentials`, `kubectl cluster-info`.
-3. `stack-dev` sur GKE en **ClusterIP**, test `port-forward`, message dans le Guestbook.
-4. `helm upgrade` pour passer en **LoadBalancer**, contrôle de l’IP publique.
-5. Installer `stack-staging` et `stack-prod` ; `helm list -A`.
-6. Supprimer/recréer le Pod Redis Leader de prod en test contrôlé ; vérifier la persistance.
-7. `helm upgrade` et `helm history`, puis rollback ; vérifier les messages.
-8. `kubectl describe deployment` : probes, ressources, labels et stratégie `Recreate`.
-9. Démonstration de la parité avec Minikube et du tunnel local.
-10. Sauvegarde/contrôles puis nettoyage avec `helm uninstall` et `terraform destroy`.
-
-Tant que Google Skills est inaccessible, les **étapes 1 à 5 et 10 sur GKE restent non réalisées**. La partie locale et les vérifications statiques sont disponibles pour une démonstration immédiate.
-
----
-
-**Liens utiles :** [Kubernetes Guestbook](https://kubernetes.io/docs/tutorials/stateless-application/guestbook/) · [Chart source](helm/guestbook/) · [Terraform](terraform/) · [Architecture](docs/architecture.md) · [Runbooks](docs/runbooks.md) · [Preuves](docs/evidence/)
+| Étape | Ce qu'on fait |
+|---|---|
+| 1 | `terraform -chdir=terraform plan` affiche No changes, puis `terraform -chdir=terraform output` |
+| 2 | `gke-gcloud-auth-plugin --version`, `get-credentials`, `kubectl cluster-info` (5.2 étape 4) |
+| 3 | `stack-dev` en ClusterIP, `port-forward`, on écrit des messages (5.2 étape 5) |
+| 4 | `helm upgrade stack-dev`, le Service passe en LoadBalancer (5.2 étape 6) |
+| 5 | installation de staging et prod, `helm list -A` (5.2 étape 7) |
+| 6 | on supprime le pod redis-leader de prod, les messages restent (runbook R7) |
+| 7 | on passe le chart en 0.2.1, `helm upgrade`, `helm history` (runbook R2) |
+| 8 | `kubectl describe deploy stack-prod-guestbook-redis-leader -n prod` : probes, ressources, labels, Recreate |
+| 9 | même chose en local avec minikube et `minikube tunnel` (5.1) |
+| 10 | `helm uninstall` puis `terraform destroy` (runbook R10) |

@@ -1,464 +1,332 @@
+# Runbooks d'exploitation
 
-# Runbooks d'exploitation — Cloud Guestbook
+Retour au [README](../README.md).
 
-## 1. Objectif
+Les commandes se lancent depuis la racine du dépôt. Dans les exemples, `<ENV>` veut dire `dev`,
+`staging` ou `prod`. La release s'appelle toujours `stack-<ENV>`.
 
-Ce document décrit les opérations courantes sur Cloud Guestbook :
+Noms des objets (exemple pour prod) :
 
-- Vérifier l'état des environnements.
-- Déployer une release Helm.
-- Modifier le nombre de réplicas.
-- Mettre à jour une release et revenir en arrière.
-- Vérifier la persistance et la réplication Redis.
-- Diagnostiquer les incidents.
-- Basculer entre Minikube et GKE.
-- Préparer la désinstallation et le nettoyage.
+| Objet | Nom |
+|---|---|
+| Deployments | `stack-prod-guestbook-frontend`, `stack-prod-guestbook-redis-leader`, `stack-prod-guestbook-redis-follower` |
+| PVC | `stack-prod-guestbook-redis-leader-data` |
+| Services | `frontend`, `redis-leader`, `redis-follower` |
 
-Les procédures locales ont été testées sur Minikube.
-Les procédures GKE sont préparées mais restent à valider en laboratoire.
+**Avant chaque commande, on vérifie sur quel cluster on est :**
 
-Toutes les commandes PowerShell sont exécutées depuis la racine
-du dépôt `livre-or-cloud`, sauf indication contraire.
-
-## 2. Contrôles préalables
-
-Avant toute opération Kubernetes ou Helm, identifier le cluster
-actif pour éviter de modifier le mauvais environnement.
-
-```powershell
+```bash
 kubectl config current-context
-kubectl config get-contexts
-kubectl cluster-info
+# minikube  ou  gke_<projet>_<region>_autopilot-cluster-1
+```
+
+Pour changer : `kubectl config get-contexts` puis `kubectl config use-context <nom>`.
+
+**On ne modifie les objets du chart qu'avec Helm.** Pas de `kubectl apply`, `kubectl edit` ou
+`kubectl scale` : Helm effacerait ces changements au prochain upgrade.
+
+La commande de mise à jour qu'on utilise partout (exemple pour staging) :
+
+```bash
+helm upgrade stack-staging helm/guestbook -n staging \
+  -f helm/guestbook/values-staging.yaml --wait
+```
+
+---
+
+## R1. Vérifier qu'un environnement va bien
+
+**Quand :** après chaque opération, ou si quelqu'un signale un problème.
+
+```bash
+helm list -A
+kubectl get deploy,pods,svc,pvc -n prod
+kubectl get endpoints -n prod
+```
+
+**C'est bon si :** la release est en `deployed`, les deployments sont prêts (en prod : frontend
+3/3, leader 1/1, followers 2/2), le PVC est en `Bound`, et chaque Service a des endpoints (pas
+`<none>`).
+
+## R2. Déployer une nouvelle version
+
+**Quand :** on change l'image ou les templates du chart.
+
+1. Faire la modification :
+   - nouvelle image : changer `frontend.image.tag` (ou un autre composant) dans `values.yaml` ;
+   - augmenter `version` dans `helm/guestbook/Chart.yaml` (par exemple 0.2.0 vers 0.2.1).
+2. Vérifier :
+
+   ```bash
+   helm lint helm/guestbook -f helm/guestbook/values-prod.yaml
+   ```
+
+3. Déployer d'abord en dev, vérifier, puis staging, puis prod :
+
+   ```bash
+   helm upgrade stack-prod helm/guestbook -n prod \
+     -f helm/guestbook/values-prod.yaml --wait
+   ```
+
+4. Vérifier :
+
+   ```bash
+   helm history stack-prod -n prod     # nouvelle révision avec la nouvelle version du chart
+   kubectl get pods -n prod            # nouveaux pods en Running
+   kubectl exec -n prod deploy/stack-prod-guestbook-redis-leader -- redis-cli GET guestbook
+   ```
+
+   Les messages sont toujours là.
+
+**À savoir :** quand la version du chart change, tous les pods sont recréés (le label
+`helm.sh/chart` change). Le leader s'arrête quelques secondes (Recreate) mais garde ses données.
+Le frontend et les followers sont remplacés sans coupure.
+
+## R3. Revenir à la version d'avant
+
+**Quand :** une mise à jour pose problème.
+
+```bash
+helm history stack-prod -n prod                # trouver le numéro de la bonne révision
+helm rollback stack-prod <REVISION> -n prod --wait
+helm history stack-prod -n prod                # une nouvelle ligne "Rollback to <REVISION>"
+```
+
+**C'est bon si :** `helm get values stack-prod -n prod` montre l'ancienne configuration et les
+messages sont toujours là (le rollback ne touche pas au PVC).
+
+Ensuite il faut aussi corriger le fichier dans Git, sinon le prochain `helm upgrade` remettra la
+mauvaise version.
+
+## R4. Changer la configuration d'un environnement
+
+**Quand :** on veut changer un réglage pour un seul environnement.
+
+1. Lire le commentaire de la valeur dans `helm/guestbook/values.yaml`.
+2. Ajouter ou modifier la valeur dans `helm/guestbook/values-<ENV>.yaml`, avec un commentaire.
+3. Regarder le résultat sans rien installer :
+
+   ```bash
+   helm template stack-staging helm/guestbook -n staging -f helm/guestbook/values-staging.yaml
+   ```
+
+4. Appliquer avec la commande `helm upgrade` habituelle.
+5. Vérifier : `helm get values stack-staging -n staging --all`.
+6. Commit du fichier.
+
+Cas particulier : si on change une variable du frontend (`frontend.env`), la ConfigMap change mais
+les pods déjà lancés gardent l'ancienne valeur. Il faut les redémarrer :
+`kubectl rollout restart deploy/stack-staging-guestbook-frontend -n staging`. Pareil pour
+`redis.conf` avec le leader.
+
+## R5. Plus de pods ou plus de ressources
+
+**Quand :** il y a beaucoup de trafic, ou des pods en `OOMKilled`.
+
+Exemple pour staging, dans `helm/guestbook/values-staging.yaml` :
+
+```yaml
+frontend:
+  # 3 pods pour plus de trafic.
+  replicaCount: 3
+  resources:
+    limits:
+      # Plus de mémoire, on avait des OOMKilled.
+      memory: 512Mi
+```
+
+Puis :
+
+```bash
+helm upgrade stack-staging helm/guestbook -n staging \
+  -f helm/guestbook/values-staging.yaml --wait
+kubectl get deploy stack-staging-guestbook-frontend -n staging    # 3/3
+kubectl describe pod -n staging -l app.kubernetes.io/component=frontend | grep -A3 Limits
+```
+
+Pour un test rapide sans modifier le fichier : ajouter `--set frontend.replicaCount=3` à la
+commande (ce sera annulé au prochain upgrade sans le `--set`).
+
+Attention : `redisLeader.replicaCount` doit rester à 1.
+
+## R6. Agrandir le volume
+
+**Quand :** le disque de Redis se remplit.
+
+```bash
+kubectl exec -n prod deploy/stack-prod-guestbook-redis-leader -- df -h /data
+```
+
+1. Vérifier que la StorageClass permet d'agrandir :
+
+   ```bash
+   kubectl get storageclass
+   # colonne ALLOWVOLUMEEXPANSION : true sur GKE (standard-rwo)
+   ```
+
+   Sur minikube ce n'est pas possible, mais la taille n'y est pas vraiment appliquée.
+2. Changer `redisLeader.persistence.size` dans `values-prod.yaml` (par exemple 2Gi vers 5Gi).
+3. `helm upgrade` habituel.
+4. Vérifier : `kubectl get pvc -n prod` montre la nouvelle taille (ça peut prendre une minute).
+
+On ne peut **jamais réduire** la taille d'un volume : le `helm upgrade` échouerait. On ne peut
+pas non plus changer le mode d'accès ou la StorageClass d'un PVC qui existe déjà.
+
+## R7. Vérifier que les données sont bien gardées
+
+**Quand :** pour contrôler, ou pour le test de persistance de la démo.
+
+```bash
+kubectl get pvc -n prod                       # Bound
+kubectl exec -n prod deploy/stack-prod-guestbook-redis-leader -- redis-cli CONFIG GET dir         # /data
+kubectl exec -n prod deploy/stack-prod-guestbook-redis-leader -- redis-cli CONFIG GET appendonly  # yes
+kubectl exec -n prod deploy/stack-prod-guestbook-redis-leader -- ls -l /data                      # appendonly.aof
+kubectl exec -n prod deploy/stack-prod-guestbook-redis-follower -- redis-cli INFO replication     # master_link_status:up
+```
+
+**Où sont les données :** dans le fichier `/data/appendonly.aof` du leader, sur le PVC
+`stack-prod-guestbook-redis-leader-data`. Sur GKE c'est un disque Google (on le voit avec
+`gcloud compute disks list`, nom `pvc-...`). Les messages sont dans la clé Redis `guestbook`.
+
+**Test de persistance :**
+
+1. Écrire 3 messages sur le site de prod.
+2. Supprimer le pod du leader :
+
+   ```bash
+   kubectl delete pod -n prod -l app.kubernetes.io/component=redis-leader
+   ```
+
+3. Attendre que le nouveau pod soit prêt :
+
+   ```bash
+   kubectl rollout status deploy/stack-prod-guestbook-redis-leader -n prod
+   kubectl get pods -n prod
+   ```
+
+4. Recharger la page : les 3 messages sont toujours là. On peut aussi vérifier avec :
+
+   ```bash
+   kubectl exec -n prod deploy/stack-prod-guestbook-redis-leader -- redis-cli GET guestbook
+   ```
+
+Les followers se reconnectent tout seuls au nouveau leader après quelques secondes.
+
+## R8. Passer le frontend de ClusterIP à LoadBalancer (et l'inverse)
+
+**Quand :** sur GKE, après avoir testé avec port-forward, ou pour fermer l'accès public.
+
+**Ouvrir (ClusterIP vers LoadBalancer) :** relancer l'upgrade habituel, sans `--set` :
+
+```bash
+helm upgrade stack-dev helm/guestbook -n dev \
+  -f helm/guestbook/values-dev.yaml --wait
+kubectl get svc frontend -n dev -w     # attendre l'EXTERNAL-IP, puis Ctrl+C
+```
+
+Le site est sur `http://<EXTERNAL-IP>:8080` (8081 pour staging, 8082 pour prod).
+
+**Fermer (LoadBalancer vers ClusterIP) :**
+
+```bash
+helm upgrade stack-dev helm/guestbook -n dev \
+  -f helm/guestbook/values-dev.yaml \
+  --set frontend.service.type=ClusterIP --wait
+kubectl get svc frontend -n dev                    # TYPE ClusterIP
+kubectl port-forward svc/frontend 18080:8080 -n dev
+```
+
+Le site est alors sur http://127.0.0.1:18080 (Cloud Shell : Web Preview, port 18080).
+
+Pour que ce soit définitif, mettre `type: ClusterIP` dans `values-dev.yaml`.
+
+## R9. Se reconnecter depuis un autre PC
+
+**Quand :** nouveau PC, nouveau Cloud Shell, ou kubeconfig perdu.
+
+```bash
+gcloud auth login
+gcloud config set project <PROJECT_ID>
+gcloud components install gke-gcloud-auth-plugin
+gke-gcloud-auth-plugin --version
+gcloud container clusters get-credentials autopilot-cluster-1 \
+  --location <REGION> --project <PROJECT_ID>
+kubectl config current-context
+kubectl get namespaces
 helm list -A
 ```
 
-Pour travailler sur Minikube :
+Les releases Helm sont enregistrées dans le cluster, donc on les retrouve depuis n'importe quel
+PC. Il suffit d'avoir le dépôt Git pour le chart.
 
-```powershell
-kubectl config use-context minikube
+## R10. Tout désinstaller et détruire le cluster
+
+**Quand :** à la fin de la session de lab.
+
+1. Désinstaller les releases :
+
+   ```bash
+   kubectl config current-context     # bien vérifier qu'on est sur le bon cluster
+   helm uninstall stack-dev -n dev
+   helm uninstall stack-staging -n staging
+   helm uninstall stack-prod -n prod
+   helm list -A                       # plus rien
+   kubectl get pvc -A                 # les PVC sont encore là (annotation keep)
+   ```
+
+2. Supprimer les PVC et les namespaces (les messages sont alors perdus) :
+
+   ```bash
+   kubectl delete pvc --all -n dev
+   kubectl delete pvc --all -n staging
+   kubectl delete pvc --all -n prod
+   kubectl delete namespace dev staging prod
+   ```
+
+   Il faut le faire avant de détruire le cluster, sinon des disques peuvent rester dans le projet.
+
+3. Détruire le cluster :
+
+   ```bash
+   terraform -chdir=terraform destroy        # taper "yes", 5 à 10 minutes
+   terraform -chdir=terraform state list     # vide
+   ```
+
+## R11. Chercher une panne
+
+Commandes utiles :
+
+```bash
+kubectl get pods -n <ENV>
+kubectl describe pod <nom-du-pod> -n <ENV>        # regarder la partie Events en bas
+kubectl logs <nom-du-pod> -n <ENV>
+kubectl logs <nom-du-pod> -n <ENV> --previous     # logs avant le dernier redémarrage
+kubectl get events -n <ENV> --sort-by=.lastTimestamp
+helm status stack-<ENV> -n <ENV>
+helm get values stack-<ENV> -n <ENV> --all
 ```
 
-Ne jamais supposer que le contexte actif est le bon.
+| Ce qu'on voit | Ce que ça peut être |
+|---|---|
+| pod en `Pending` | sur GKE, Autopilot crée une machine (attendre 1 ou 2 minutes) ; ou le PVC n'est pas `Bound` |
+| PVC en `Pending` | pas de StorageClass par défaut (`kubectl get storageclass`) |
+| `CrashLoopBackOff` | erreur dans `redis.conf`, ou pas assez de mémoire (`OOMKilled` dans `describe`) |
+| pod jamais `Ready` | la readiness probe échoue (voir Events dans `describe`) |
+| le site ne garde pas les messages | un Service Redis sans endpoints (`kubectl get endpoints -n <ENV>`), ou un Service renommé |
+| `helm upgrade` : "field is immutable" | on a essayé de changer un selector, ou de réduire la taille du PVC |
+| `helm install` : "already exists" | la release existe déjà (faire `helm upgrade`), ou des objets créés avant avec `kubectl apply` |
+| `EXTERNAL-IP` en `<pending>` | en local : `minikube tunnel` n'est pas lancé ; sur GKE : attendre 1 à 3 minutes |
 
-## 3. Vérifier l'état des environnements
+## R12. Faire une sauvegarde de Redis
 
-Utiliser ce runbook après un déploiement, une mise à jour
-ou lorsqu'une anomalie est signalée.
+Le PVC protège contre un redémarrage, mais pas si on supprime le PVC ou le cluster. Pour garder
+une copie des messages :
 
-```powershell
-helm list -A
-
-kubectl get deployments -n dev
-kubectl get deployments -n staging
-kubectl get deployments -n prod
-
-kubectl get pods -A
-kubectl get pvc -A
+```bash
+POD=$(kubectl get pod -n prod -l app.kubernetes.io/component=redis-leader -o jsonpath='{.items[0].metadata.name}')
+mkdir -p ../sauvegarde
+kubectl cp prod/$POD:/data/appendonly.aof ../sauvegarde/prod-appendonly.aof
+ls -l ../sauvegarde
 ```
 
-Réplicas attendus en configuration nominale :
-
-| Composant | dev | staging | prod |
-|---|---:|---:|---:|
-| Frontend | 1 | 2 | 3 |
-| Redis Leader | 1 | 1 | 1 |
-| Redis Followers | 1 | 2 | 2 |
-
-Résultats attendus :
-
-- Releases Helm au statut `deployed`.
-- Tous les réplicas attendus au statut Ready.
-- PVC au statut `Bound`.
-- Services Redis et frontend présents.
-
-Pour vérifier la connectivité des Services :
-
-```powershell
-kubectl get svc,endpoints -n dev
-kubectl get svc,endpoints -n staging
-kubectl get svc,endpoints -n prod
-```
-
-Les Services applicatifs doivent posséder des endpoints.
-
-## 4. Installer une release Helm
-
-Ce runbook s'applique à un namespace vierge.
-
-Vérifier d'abord le contexte et valider le chart :
-
-```powershell
-kubectl config current-context
-
-helm lint .\helm\guestbook `
-  -f .\helm\guestbook\values-staging.yaml
-```
-
-Exemple d'installation de staging sur un cluster neuf :
-
-```powershell
-helm install stack-staging .\helm\guestbook `
-  --namespace staging `
-  --create-namespace `
-  -f .\helm\guestbook\values-staging.yaml `
-  --wait `
-  --timeout 10m
-```
-
-Contrôler :
-
-```powershell
-helm status stack-staging -n staging
-kubectl get pods,svc,pvc -n staging
-```
-
-Ne pas réinstaller une release qui existe déjà.
-
-Cas particulier : le namespace dev sur le Minikube historique
-a été migré depuis des manifestes classiques avec Helm
-`--take-ownership`. Ne pas rejouer cette migration sur un
-cluster neuf.
-
-## 5. Modifier le nombre de réplicas
-
-Utiliser ce runbook pour augmenter ou diminuer la capacité
-du frontend.
-
-Exemple : passer staging de 2 à 3 frontends.
-
-```powershell
-helm upgrade stack-staging .\helm\guestbook `
-  --namespace staging `
-  -f .\helm\guestbook\values-staging.yaml `
-  --set frontend.replicaCount=3 `
-  --wait `
-  --timeout 10m
-```
-
-Vérifier :
-
-```powershell
-kubectl get deployment frontend -n staging
-kubectl get pods -n staging
-helm history stack-staging -n staging
-```
-
-Résultat attendu : `frontend` affiche 3/3 réplicas Ready.
-
-Pour rendre ce changement permanent, modifier également
-`values-staging.yaml`, puis versionner le fichier.
-
-Ne pas modifier directement le nombre de réplicas avec
-`kubectl scale` lorsqu'il est géré par Helm.
-
-## 6. Effectuer un rollback Helm
-
-Utiliser ce runbook après une mise à jour problématique.
-
-Consulter l'historique :
-
-```powershell
-helm history stack-staging -n staging
-```
-
-Identifier la révision stable à restaurer.
-
-Exemple testé dans le projet : retour à la révision 1.
-
-```powershell
-helm rollback stack-staging 1 `
-  --namespace staging `
-  --wait `
-  --timeout 10m
-```
-
-Vérifier :
-
-```powershell
-helm history stack-staging -n staging
-kubectl get deployments -n staging
-kubectl get pods -n staging
-```
-
-Le rollback crée une nouvelle révision Helm.
-Il ne supprime pas les anciennes révisions de l'historique.
-
-Les messages Redis doivent rester disponibles après le rollback.
-
-## 7. Vérifier Redis
-
-### 7.1 Disponibilité du leader
-
-```powershell
-kubectl exec -n dev deployment/redis-leader -- redis-cli PING
-```
-
-Résultat attendu : `PONG`.
-
-### 7.2 Réplication
-
-```powershell
-kubectl exec -n dev deployment/redis-follower -- `
-  redis-cli INFO replication
-```
-
-Vérifier :
-
-- `role:slave` (terminologie Redis 6).
-- `master_host:redis-leader`.
-- `master_link_status:up`.
-- `master_sync_in_progress:0`.
-
-### 7.3 Persistance
-
-Vérifier une clé créée précédemment :
-
-```powershell
-kubectl exec -n dev deployment/redis-leader -- `
-  redis-cli GET persistence_test
-```
-
-Dans notre environnement de test, la valeur attendue est `hello`.
-
-Vérifier le PVC :
-
-```powershell
-kubectl get pvc redis-leader-pvc -n dev
-```
-
-La ressource doit rester `Bound`.
-
-### 7.4 Tester un redémarrage
-
-Cette opération provoque une interruption temporaire du leader.
-Ne pas l'exécuter pendant une période d'utilisation sensible.
-
-Avant le test, vérifier que la sauvegarde des données existe.
-
-```powershell
-kubectl get pods -n dev `
-  -l app.kubernetes.io/component=redis-leader
-```
-
-Le Pod peut ensuite être supprimé pour valider sa recréation
-automatique par Kubernetes. Après le redémarrage, contrôler
-la valeur Redis et le PVC d'origine.
-
-## 8. Sauvegarder Redis
-
-La persistance sur PVC protège les données contre un redémarrage
-de Pod, mais ne remplace pas une sauvegarde indépendante.
-
-Créer une sauvegarde Redis :
-
-```powershell
-kubectl exec -n dev deployment/redis-leader -- redis-cli SAVE
-
-$redisPod = kubectl get pods -n dev `
-  -l app.kubernetes.io/component=redis-leader `
-  -o jsonpath='{.items[0].metadata.name}'
-
-New-Item -ItemType Directory -Force `
-  -Path ..\guestbook-backup | Out-Null
-
-kubectl cp "dev/${redisPod}:/data/dump.rdb" `
-  "..\guestbook-backup\dev-redis-dump.rdb"
-
-kubectl cp "dev/${redisPod}:/data/appendonly.aof" `
-  "..\guestbook-backup\dev-redis-appendonly.aof"
-```
-
-Vérifier les fichiers obtenus :
-
-```powershell
-Get-ChildItem ..\guestbook-backup
-```
-
-Ne pas versionner les sauvegardes contenant des données.
-
-La procédure de restauration doit être testée séparément
-avant toute utilisation sur des données importantes.
-
-## 9. Diagnostiquer un incident
-
-### 9.1 Identifier les ressources en anomalie
-
-```powershell
-kubectl get pods -n staging
-kubectl get events -n staging --sort-by=.lastTimestamp
-helm status stack-staging -n staging
-```
-
-### 9.2 Examiner un Deployment
-
-```powershell
-kubectl describe deployment frontend -n staging
-kubectl describe deployment redis-leader -n staging
-```
-
-### 9.3 Consulter les journaux
-
-```powershell
-kubectl logs -n staging deployment/frontend --tail=100
-kubectl logs -n staging deployment/redis-leader --tail=100
-kubectl logs -n staging deployment/redis-follower --tail=100
-```
-
-### 9.4 Vérifier la configuration Helm
-
-```powershell
-helm get values stack-staging -n staging
-helm history stack-staging -n staging
-```
-
-Points à contrôler :
-
-- Image introuvable ou échec de démarrage.
-- Erreur de ConfigMap.
-- PVC non monté ou en attente.
-- Readiness ou liveness probe en échec.
-- Redis Follower déconnecté du leader.
-- Service sans endpoints.
-
-Corriger la configuration dans les sources du projet, puis
-appliquer la modification avec Helm.
-
-## 10. Accès à l'application sur Minikube
-
-Vérifier le contexte :
-
-```powershell
-kubectl config current-context
-```
-
-Dans un terminal dédié, lancer :
-
-```powershell
-minikube tunnel
-```
-
-Consulter les Services :
-
-```powershell
-kubectl get svc -n dev
-kubectl get svc -n staging
-kubectl get svc -n prod
-```
-
-Ports locaux prévus :
-
-- dev : http://127.0.0.1:8080
-- staging : http://127.0.0.1:8081
-- prod : http://127.0.0.1:8082
-
-Alternative sans tunnel :
-
-```powershell
-kubectl port-forward -n dev svc/frontend 18080:8080
-```
-
-Accès : http://127.0.0.1:18080
-
-## 11. Préparation GKE — Non encore validée
-
-Le cluster GKE Autopilot sera créé avec Terraform.
-
-Avant l'opération, vérifier le compte GCP autorisé, le
-projet, la région et les quotas disponibles.
-
-La connexion est prévue avec :
-
-```powershell
-gcloud.cmd container clusters get-credentials autopilot-cluster-1 `
-  --location <REGION> `
-  --project <PROJECT_ID>
-```
-
-Vérifier impérativement le contexte Kubernetes après connexion.
-
-### Particularité de dev sur un nouveau cluster
-
-Le fichier `values-dev.yaml` conserve le sélecteur historique
-`guestbook` utilisé lors de l'adoption sur Minikube.
-
-Sur un cluster GKE vierge, forcer un sélecteur correspondant
-au nom de la release avec :
-
-`--set-string selectorInstanceOverride=`
-
-### Test initial en ClusterIP
-
-```powershell
-helm install stack-dev .\helm\guestbook `
-  --namespace dev `
-  --create-namespace `
-  -f .\helm\guestbook\values-dev.yaml `
-  --set-string selectorInstanceOverride= `
-  --set frontend.service.type=ClusterIP `
-  --wait `
-  --timeout 10m
-```
-
-Tester ensuite :
-
-```powershell
-kubectl port-forward -n dev svc/frontend 18080:8080
-```
-
-### Ouverture en LoadBalancer
-
-Après validation fonctionnelle :
-
-```powershell
-helm upgrade stack-dev .\helm\guestbook `
-  --namespace dev `
-  -f .\helm\guestbook\values-dev.yaml `
-  --set-string selectorInstanceOverride= `
-  --set frontend.service.type=LoadBalancer `
-  --wait `
-  --timeout 10m
-```
-
-Vérifier :
-
-```powershell
-kubectl get svc frontend -n dev
-```
-
-Ces commandes GKE sont préparées, mais leur exécution réelle
-reste en attente d'accès au laboratoire Google Skills.
-
-## 12. Désinstallation et nettoyage
-
-Attention : supprimer une release Helm ou détruire un cluster
-peut entraîner une perte définitive de données.
-
-Avant toute désinstallation :
-
-1. Vérifier le contexte Kubernetes.
-2. Sauvegarder les données Redis.
-3. Vérifier la politique de conservation des PVC.
-4. Identifier les volumes et données à préserver.
-
-Le chart 0.1.1 inclut l'annotation :
-
-`helm.sh/resource-policy: keep`
-
-Cependant, les releases installées avec la version 0.1.0
-peuvent encore présenter un risque de suppression du PVC.
-
-Ne jamais supposer qu'un PVC est automatiquement conservé
-sans vérifier les manifestes de la release installée.
-
-La procédure de destruction de GKE avec `terraform destroy`
-sera exécutée uniquement durant une session de lab autorisée.
-
-## 13. Limites opérationnelles
-
-- Redis Leader est un point unique de défaillance.
-- Le PVC ne protège pas contre toutes les pertes de données.
-- La restauration complète Redis reste à valider.
-- Les opérations cloud restent à démontrer.
-- La sécurité Redis nécessite un durcissement avant production.
-- Les volumes persistants ne doivent pas être supprimés
-  pendant les tests de déploiement.
+On ne met jamais une sauvegarde dans Git. On n'a pas encore testé la restauration.

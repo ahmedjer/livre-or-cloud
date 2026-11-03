@@ -1,26 +1,18 @@
-
-# Redis Follower Service Helm Template
-# Internal ClusterIP Service for Redis read operations.
-# The name redis-follower is required by the PHP Guestbook.
-
+{{/*
+Service ClusterIP des Redis followers (interne au cluster).
+Le nom doit rester "redis-follower" : le frontend lit les messages
+sous ce nom (avec GET_HOSTS_FROM=dns).
+*/}}
 apiVersion: v1
 kind: Service
-
 metadata:
   name: {{ .Values.redisFollower.service.name }}
-
   labels:
-    {{- include "guestbook.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis-follower
-
+    {{- include "guestbook.componentLabels" (dict "root" . "component" "redis-follower") | nindent 4 }}
 spec:
-  # Redis must remain internal to Kubernetes.
   type: ClusterIP
-
   selector:
-    {{- include "guestbook.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: redis-follower
-
+    {{- include "guestbook.componentSelectorLabels" (dict "root" . "component" "redis-follower") | nindent 4 }}
   ports:
     - name: redis
       port: {{ .Values.redisFollower.service.port }}

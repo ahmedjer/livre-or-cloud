@@ -1,27 +1,59 @@
+# Environnement prod (release stack-prod, namespace prod).
+# Seulement ce qui change par rapport à values.yaml.
+# Plus de pods, plus de ressources, volume plus grand.
 
-# =====================================================
-# Production Environment - Helm Overrides
-# Release: stack-prod
-# Namespace: prod
-# =====================================================
-
-# Environment-specific labels.
 commonLabels:
+  # Label environment sur tous les objets.
   environment: prod
 
-# PHP Frontend configuration.
 frontend:
+  # 3 pods : le site reste en ligne si un pod tombe.
   replicaCount: 3
-
   service:
+    # LoadBalancer (minikube tunnel ou IP publique sur GKE).
     type: LoadBalancer
+    # Port 8082 (dev 8080, staging 8081).
     port: 8082
+  # Plus de ressources pour le vrai trafic.
+  resources:
+    requests:
+      # CPU réservé.
+      cpu: 150m
+      # Mémoire réservée.
+      memory: 192Mi
+    limits:
+      # CPU maximum.
+      cpu: 300m
+      # Mémoire maximum.
+      memory: 384Mi
 
-# Redis Leader persistent storage.
 redisLeader:
   persistence:
+    # Les vrais messages des hôtels : on prévoit plus de place.
     size: 2Gi
+  resources:
+    requests:
+      # Le leader reçoit toutes les écritures.
+      cpu: 200m
+      # Toutes les données sont en mémoire.
+      memory: 256Mi
+    limits:
+      # CPU maximum.
+      cpu: 500m
+      # Mémoire maximum.
+      memory: 512Mi
 
-# Number of Redis read replicas.
 redisFollower:
+  # 2 followers : la lecture marche encore si l'un redémarre.
   replicaCount: 2
+  resources:
+    requests:
+      # CPU réservé.
+      cpu: 150m
+      # Mémoire réservée.
+      memory: 192Mi
+    limits:
+      # CPU maximum.
+      cpu: 300m
+      # Mémoire maximum.
+      memory: 384Mi

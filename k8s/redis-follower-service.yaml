@@ -1,7 +1,6 @@
 
-# Redis Follower Service
-# Provides a stable internal DNS name for Redis read replicas.
-# The PHP frontend uses this Service to read Guestbook messages.
+# Service interne des Redis followers.
+# Le frontend lit les messages via le nom redis-follower.
 
 apiVersion: v1
 kind: Service
@@ -15,7 +14,7 @@ metadata:
     app.kubernetes.io/part-of: guestbook
 
 spec:
-  # Redis must not be exposed outside the cluster.
+  # Redis ne doit pas être accessible en dehors du cluster.
   type: ClusterIP
 
   selector:

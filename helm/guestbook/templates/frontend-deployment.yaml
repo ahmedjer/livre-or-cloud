@@ -1,72 +1,54 @@
-
-# PHP Guestbook Frontend Deployment Helm Template
-# Deploys the application web interface.
-# Replicas, image, resources and probes are configurable.
-
+{{/*
+Deployment du frontend PHP (l'interface web du livre d'or).
+Stratégie RollingUpdate : les pods sont remplacés un par un,
+le site reste accessible pendant une mise à jour.
+*/}}
+{{- $component := dict "root" . "component" "frontend" }}
 apiVersion: apps/v1
 kind: Deployment
-
 metadata:
-  name: frontend
-
+  name: {{ include "guestbook.componentName" $component }}
   labels:
-    {{- include "guestbook.labels" . | nindent 4 }}
-    app.kubernetes.io/component: frontend
-
+    {{- include "guestbook.componentLabels" $component | nindent 4 }}
 spec:
-  # Number of frontend replicas.
   replicas: {{ .Values.frontend.replicaCount }}
-
-  # Rolling updates to maintain application availability.
   strategy:
     type: RollingUpdate
     rollingUpdate:
+      # 1 pod en plus pendant la mise à jour, et jamais de pod en moins.
       maxSurge: 1
       maxUnavailable: 0
-
   selector:
     matchLabels:
-      {{- include "guestbook.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: frontend
-
+      {{- include "guestbook.componentSelectorLabels" $component | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "guestbook.labels" . | nindent 8 }}
-        app.kubernetes.io/component: frontend
-
+        {{- include "guestbook.componentLabels" $component | nindent 8 }}
     spec:
       containers:
         - name: php-redis
-
-          # Official PHP Guestbook image.
           image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
           imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
-
           ports:
             - name: http
-              containerPort: {{ .Values.frontend.service.targetPort }}
+              containerPort: {{ .Values.frontend.containerPort }}
               protocol: TCP
-
-          # Load application variables from the ConfigMap.
+          # Les variables viennent de la ConfigMap du frontend.
           envFrom:
             - configMapRef:
-                name: frontend-config
-
-          # HTTP readiness probe.
+                name: {{ include "guestbook.componentName" $component }}
+          # Readiness : le pod reçoit du trafic seulement si la page / répond.
           readinessProbe:
             httpGet:
               path: /
               port: http
             {{- toYaml .Values.frontend.readinessProbe | nindent 12 }}
-
-          # HTTP liveness probe.
+          # Liveness : le conteneur est redémarré si la page / ne répond plus.
           livenessProbe:
             httpGet:
               path: /
               port: http
             {{- toYaml .Values.frontend.livenessProbe | nindent 12 }}
-
-          # Configurable CPU and memory resources.
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}

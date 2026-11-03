@@ -1,6 +1,6 @@
 
-# Redis Leader PersistentVolumeClaim
-# Requests persistent storage for Redis application data.
+# PersistentVolumeClaim du Redis leader (monté sur /data).
+# Pas de storageClassName : la StorageClass par défaut est utilisée.
 
 apiVersion: v1
 kind: PersistentVolumeClaim

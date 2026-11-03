@@ -1,7 +1,6 @@
 
-# Redis Follower Deployment
-# Creates Redis read replicas that synchronize with redis-leader.
-# Uses RollingUpdate to avoid unnecessary downtime.
+# Deployment des Redis followers : copies du leader pour la lecture.
+# RollingUpdate pour remplacer les pods sans coupure.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -15,7 +14,7 @@ metadata:
     app.kubernetes.io/part-of: guestbook
 
 spec:
-  # One follower in dev to save resources.
+  # 1 follower suffit pour les tests.
   replicas: 1
 
   strategy:
@@ -42,7 +41,7 @@ spec:
       containers:
         - name: redis-follower
 
-          # Official Guestbook Redis Follower image.
+          # Image follower officielle du Guestbook.
           image: us-docker.pkg.dev/google-samples/containers/gke/gb-redis-follower:v2
           imagePullPolicy: IfNotPresent
 
@@ -51,7 +50,7 @@ spec:
               containerPort: 6379
               protocol: TCP
 
-          # Checks whether Redis is ready for traffic.
+          # Readiness : Redis doit répondre PONG.
           readinessProbe:
             exec:
               command:
@@ -62,7 +61,7 @@ spec:
             timeoutSeconds: 2
             failureThreshold: 3
 
-          # Restarts the container if Redis stops responding.
+          # Liveness : redémarrage si Redis ne répond plus.
           livenessProbe:
             exec:
               command:
@@ -73,11 +72,11 @@ spec:
             timeoutSeconds: 2
             failureThreshold: 3
 
-          # CPU and memory requests and limits.
+          # CPU et mémoire réservés (requests) et maximum (limits).
           resources:
             requests:
               cpu: 100m
-              memory: 100Mi
+              memory: 128Mi
             limits:
               cpu: 250m
               memory: 256Mi

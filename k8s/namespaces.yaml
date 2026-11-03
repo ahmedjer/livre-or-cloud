@@ -1,6 +1,6 @@
 
-# namespaces.yaml
-# Creates three isolated environments for the Cloud Guestbook application.
+# Les 3 namespaces du projet : dev, staging et prod.
+# Chaque environnement est isolé dans son namespace.
 
 apiVersion: v1
 kind: Namespace

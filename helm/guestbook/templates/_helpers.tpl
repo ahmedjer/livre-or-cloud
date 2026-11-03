@@ -1,17 +1,20 @@
+{{/*
+Fonctions communes du chart : noms des objets et labels.
+Les templates des objets utilisent ces fonctions, comme ça
+aucun nom ni label n'est écrit à la main.
+*/}}
 
 {{/*
-Return the chart name.
-Supports overriding the name through values.yaml.
+Nom du chart ("guestbook"), modifiable avec nameOverride.
 */}}
 {{- define "guestbook.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-
 {{/*
-Return the full application name.
-Combines the Helm release and chart name.
-Example: stack-dev-guestbook.
+Nom complet : <release>-guestbook (exemple : stack-test-guestbook).
+Modifiable avec fullnameOverride. Coupé à 63 caractères car
+Kubernetes refuse les noms plus longs.
 */}}
 {{- define "guestbook.fullname" -}}
 {{- if .Values.fullnameOverride -}}
@@ -21,37 +24,26 @@ Example: stack-dev-guestbook.
 {{- end -}}
 {{- end -}}
 
-
 {{/*
-Return the chart name and version.
-Example: guestbook-0.1.0.
+Nom et version du chart pour le label helm.sh/chart (exemple : guestbook-0.2.0).
 */}}
 {{- define "guestbook.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-
 {{/*
-Stable selector labels for Kubernetes Deployments and Services.
-These labels identify the Helm release.
-*/}}
-
-{{/*
-Stable selector labels for Kubernetes Deployments and Services.
-
-By default, use the Helm release name.
-For dev migration, preserve the original immutable selector.
+Labels utilisés dans les selectors.
+Pas de numéro de version ici : le selector d'un Deployment ne peut
+plus être modifié après la création, sinon le helm upgrade échoue.
 */}}
 {{- define "guestbook.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "guestbook.name" . }}
-app.kubernetes.io/instance: {{ default .Release.Name .Values.selectorInstanceOverride }}
+app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
-
-
 {{/*
-Common labels applied to application resources.
-Includes chart metadata, release information and custom labels.
+Labels mis sur tous les objets : infos du chart et de la release,
+plus les commonLabels des fichiers values (environment, team).
 */}}
 {{- define "guestbook.labels" -}}
 helm.sh/chart: {{ include "guestbook.chart" . }}
@@ -62,4 +54,34 @@ app.kubernetes.io/part-of: guestbook
 {{- with .Values.commonLabels }}
 {{ toYaml . }}
 {{- end }}
+{{- end -}}
+
+{{/*
+Les 3 fonctions suivantes prennent 2 paramètres :
+  root      = le contexte du chart (le point ".")
+  component = frontend, redis-leader ou redis-follower
+Exemple : include "guestbook.componentName" (dict "root" . "component" "frontend")
+*/}}
+
+{{/*
+Nom d'un objet d'un composant (exemple : stack-test-guestbook-redis-leader).
+*/}}
+{{- define "guestbook.componentName" -}}
+{{- printf "%s-%s" (include "guestbook.fullname" .root) .component | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Labels communs + label du composant (pour metadata.labels).
+*/}}
+{{- define "guestbook.componentLabels" -}}
+{{ include "guestbook.labels" .root }}
+app.kubernetes.io/component: {{ .component }}
+{{- end -}}
+
+{{/*
+Labels du selector + label du composant (pour spec.selector).
+*/}}
+{{- define "guestbook.componentSelectorLabels" -}}
+{{ include "guestbook.selectorLabels" .root }}
+app.kubernetes.io/component: {{ .component }}
 {{- end -}}

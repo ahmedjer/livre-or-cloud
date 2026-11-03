@@ -1,7 +1,5 @@
 
-# Frontend ConfigMap
-# Externalizes the PHP Guestbook application configuration.
-# The frontend discovers Redis Services through Kubernetes DNS.
+# ConfigMap du frontend PHP : variables d'environnement de l'application.
 
 apiVersion: v1
 kind: ConfigMap
@@ -14,5 +12,5 @@ metadata:
     app.kubernetes.io/part-of: guestbook
 
 data:
-  # Use Kubernetes DNS to locate the Redis Services.
+  # Le frontend trouve Redis avec les noms des Services (DNS).
   GET_HOSTS_FROM: "dns"

@@ -1,29 +1,26 @@
-
-# Redis Leader PersistentVolumeClaim
-# Uses dynamic provisioning with the default StorageClass.
-
+{{/*
+PersistentVolumeClaim du Redis leader, monté sur /data.
+Si storageClass est vide, on n'écrit PAS le champ storageClassName :
+Kubernetes prend alors la StorageClass par défaut du cluster.
+Attention : écrire storageClassName: "" voudrait dire "aucune
+StorageClass" et le PVC resterait en Pending.
+L'annotation keep empêche helm uninstall de supprimer le PVC
+(on ne perd pas les messages par erreur).
+*/}}
 apiVersion: v1
 kind: PersistentVolumeClaim
-
 metadata:
-  name: redis-leader-pvc
-
-  # Preserve the PVC when Helm uninstalls the release.
+  name: {{ include "guestbook.componentName" (dict "root" . "component" "redis-leader") }}-data
   annotations:
     helm.sh/resource-policy: keep
-
   labels:
-    {{- include "guestbook.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis-leader
-
+    {{- include "guestbook.componentLabels" (dict "root" . "component" "redis-leader") | nindent 4 }}
 spec:
   accessModes:
     - {{ .Values.redisLeader.persistence.accessMode | quote }}
-
   resources:
     requests:
       storage: {{ .Values.redisLeader.persistence.size | quote }}
-
   {{- with .Values.redisLeader.persistence.storageClass }}
   storageClassName: {{ . | quote }}
   {{- end }}

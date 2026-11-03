@@ -1,17 +1,14 @@
-
-# Redis Leader ConfigMap Helm template
-# Generates the Redis configuration from values.yaml.
-
+{{/*
+ConfigMap du Redis leader : contient le fichier redis.conf.
+Ce fichier est monté dans le conteneur et donné à redis-server au
+démarrage. C'est lui qui active la sauvegarde des messages sur /data.
+*/}}
 apiVersion: v1
 kind: ConfigMap
-
 metadata:
-  name: redis-leader-config
-
+  name: {{ include "guestbook.componentName" (dict "root" . "component" "redis-leader") }}
   labels:
-    {{- include "guestbook.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis-leader
-
+    {{- include "guestbook.componentLabels" (dict "root" . "component" "redis-leader") | nindent 4 }}
 data:
   redis.conf: |
-{{ .Values.redisLeader.redisConfig | indent 4 }}
+    {{- .Values.redisLeader.redisConfig | nindent 4 }}

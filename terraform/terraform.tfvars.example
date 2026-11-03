@@ -1,23 +1,14 @@
+# Modèle pour terraform.tfvars.
+# Au début de chaque session de lab :
+#   cp terraform.tfvars.example terraform.tfvars
+# puis remplacer les deux valeurs ci-dessous.
+# Ne jamais mettre terraform.tfvars dans Git (il est dans le .gitignore).
 
-# Example Terraform variables for the Cloud Guestbook.
-#
-# Copy this file to terraform.tfvars when the lab starts.
-# Replace placeholders with values from the lab.
-#
-# Never commit the real terraform.tfvars file.
+# ID du projet : dans le panneau du lab, ou avec "gcloud config get-value project".
+project_id = "REMPLACER_PAR_LE_PROJECT_ID_DU_LAB"
 
-project_id = "REPLACE_WITH_LAB_PROJECT_ID"
+# Région : dans le panneau du lab (exemple : us-central1).
+region = "REMPLACER_PAR_LA_REGION_DU_LAB"
 
-cluster_name = "autopilot-cluster-1"
-
-region = "REPLACE_WITH_LAB_REGION"
-
-network    = "default"
-subnetwork = "default"
-
-ip_range_pods     = null
-ip_range_services = null
-
-release_channel = "REGULAR"
-
-deletion_protection = false
+# Les autres variables ont une valeur par défaut dans variables.tf
+# (cluster_name, network, subnetwork, release_channel...).

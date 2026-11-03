@@ -1,215 +1,246 @@
-
-# ============================================================
-# Cloud Guestbook - Helm Default Values
-# ============================================================
-# Default configuration shared by dev, staging and prod.
-# Environment-specific values files override these defaults.
+# Valeurs par défaut du chart guestbook.
+# Elles servent pour les 3 environnements. Les fichiers
+# values-dev.yaml, values-staging.yaml et values-prod.yaml
+# contiennent seulement ce qui change par rapport à ce fichier.
 #
-# Application architecture:
-#   - PHP Guestbook Frontend
-#   - Redis Leader (writes and persistent storage)
-#   - Redis Followers (reads and replication)
-# ============================================================
+# Dans chaque namespace on déploie :
+#   - le frontend PHP (le site web)
+#   - le Redis leader (reçoit les écritures, données sur un volume)
+#   - les Redis followers (copies du leader, pour la lecture)
 
 
-# ------------------------------------------------------------
-# 1. Global chart configuration
-# ------------------------------------------------------------
+# ---------- Général ----------
 
-# Optional override for the application name.
+# Remplace le nom "guestbook" dans les noms des objets. Vide = "guestbook".
 nameOverride: ""
 
-# Optional override for the full resource name.
+# Remplace le début des noms (par défaut "<release>-guestbook",
+# par exemple "stack-prod-guestbook"). Vide = valeur par défaut.
 fullnameOverride: ""
 
-# Optional selector compatibility override.
-# Empty means use the Helm release name.
-# Used when adopting existing Kubernetes Deployments.
-selectorInstanceOverride: ""
-
-# Common labels applied to Kubernetes resources.
+# Labels ajoutés sur tous les objets.
 commonLabels:
+  # Nom de l'environnement (changé dans chaque values-<ENV>.yaml).
   environment: dev
+  # Équipe responsable.
   team: platform
 
 
-# ------------------------------------------------------------
-# 2. PHP Guestbook Frontend
-# ------------------------------------------------------------
+# ---------- Frontend PHP ----------
 
 frontend:
 
-  # Number of frontend Pods.
+  # Nombre de pods du frontend.
   replicaCount: 1
 
-  # Official Guestbook frontend Docker image.
   image:
+    # Image officielle du frontend Guestbook.
     repository: us-docker.pkg.dev/google-samples/containers/gke/gb-frontend
+    # Version de l'image (jamais "latest").
     tag: "v5"
+    # IfNotPresent : on ne retélécharge pas l'image si elle est déjà sur le nœud.
     pullPolicy: IfNotPresent
 
-  # Frontend environment variables.
+  # Port d'Apache dans le conteneur (fixé par l'image).
+  containerPort: 80
+
+  # Variables d'environnement, mises dans la ConfigMap du frontend.
   env:
-    # Use Kubernetes DNS for Redis discovery.
+    # "dns" : le frontend trouve Redis avec les noms des Services
+    # (redis-leader et redis-follower).
     GET_HOSTS_FROM: "dns"
 
-  # Frontend Kubernetes Service configuration.
   service:
-    # Service name used to access the frontend.
+    # Nom du Service du frontend.
     name: frontend
-
-    # LoadBalancer for local minikube testing.
-    # Can be overridden to ClusterIP on GKE.
+    # LoadBalancer (minikube tunnel ou IP publique GKE) ou ClusterIP (test avec port-forward).
     type: LoadBalancer
-
-    # Port exposed by the Kubernetes Service.
+    # Port du Service. Différent pour chaque environnement en local
+    # car minikube tunnel met tous les LoadBalancer sur 127.0.0.1.
     port: 8080
 
-    # HTTP port inside the frontend container.
-    targetPort: 80
-
-  # CPU and memory reservations and limits.
+  # CPU et mémoire du conteneur.
+  # requests = ce qui est réservé, limits = le maximum autorisé.
+  # 100m = 0,1 CPU. Sur GKE Autopilot il faut au moins 1 Gi de mémoire
+  # par CPU demandé, d'où 128Mi pour 100m.
   resources:
     requests:
+      # CPU réservé.
       cpu: 100m
-      memory: 100Mi
+      # Mémoire réservée.
+      memory: 128Mi
     limits:
+      # CPU maximum (au-delà le conteneur est ralenti).
       cpu: 250m
+      # Mémoire maximum (au-delà le conteneur est tué : OOMKilled).
       memory: 256Mi
 
-  # Checks whether the frontend is ready.
+  # Readiness probe : tant qu'elle échoue, le pod ne reçoit pas de trafic.
   readinessProbe:
+    # Secondes d'attente avant le premier test.
     initialDelaySeconds: 5
+    # Secondes entre deux tests.
     periodSeconds: 5
+    # Secondes max pour une réponse.
     timeoutSeconds: 3
+    # Nombre d'échecs de suite avant de considérer le pod pas prêt.
     failureThreshold: 3
 
-  # Restarts an unhealthy frontend container.
+  # Liveness probe : si elle échoue, le conteneur est redémarré.
+  # Plus lente que la readiness pour ne pas redémarrer un pod qui démarre.
   livenessProbe:
+    # Secondes d'attente avant le premier test.
     initialDelaySeconds: 15
+    # Secondes entre deux tests.
     periodSeconds: 10
+    # Secondes max pour une réponse.
     timeoutSeconds: 3
+    # Nombre d'échecs de suite avant le redémarrage.
     failureThreshold: 3
 
 
-# ------------------------------------------------------------
-# 3. Redis Leader
-# ------------------------------------------------------------
+# ---------- Redis leader ----------
 
 redisLeader:
 
-  # Exactly one Redis Leader handles write operations.
+  # Toujours 1 : un seul Redis doit écrire sur le volume.
   replicaCount: 1
 
-  # Redis Docker image.
   image:
+    # Image Redis officielle (celle du tutoriel Kubernetes).
     repository: docker.io/redis
+    # Version de Redis (jamais "latest").
     tag: "6.0.5"
+    # On ne retélécharge pas l'image si elle est déjà sur le nœud.
     pullPolicy: IfNotPresent
 
-  # Internal Kubernetes Service.
   service:
-    # Name expected by the Guestbook application.
+    # Nom du Service. NE PAS CHANGER : les images du frontend et des
+    # followers cherchent Redis sous le nom "redis-leader".
     name: redis-leader
-
-    # Default Redis TCP port.
+    # Port de Redis.
     port: 6379
 
-  # Persistent storage configuration.
   persistence:
-    # PVC storage capacity.
+    # Taille du volume (on peut l'augmenter plus tard, pas la réduire).
     size: 1Gi
-
-    # A single node can mount the volume for writing.
+    # ReadWriteOnce : le volume ne peut être monté que par un seul nœud.
     accessMode: ReadWriteOnce
-
-    # Empty means the Helm template must OMIT
-    # storageClassName to use the default StorageClass.
+    # Vide = StorageClass par défaut du cluster (standard sur minikube,
+    # standard-rwo sur GKE). Le template n'écrit alors pas storageClassName.
     storageClass: ""
 
-  # Redis configuration stored in a ConfigMap.
+  # Contenu du fichier redis.conf (mis dans la ConfigMap du leader).
   redisConfig: |
-    # Listen on the container network interface.
+    # Écouter sur toutes les interfaces du pod.
     bind 0.0.0.0
 
-    # Lab-only setting: authentication is not configured.
+    # Pas de mot de passe dans ce projet, donc on désactive le mode protégé
+    # pour que les autres pods puissent se connecter.
     protected-mode no
 
-    # Persistent data directory.
+    # Dossier des données = le volume persistant.
     dir /data
 
-    # Enable append-only persistence.
+    # Mode AOF : chaque écriture est ajoutée au fichier appendonly.aof.
     appendonly yes
 
-    # Synchronize every write to disk.
+    # Écriture sur le disque après chaque commande : on ne perd aucun message.
     appendfsync always
 
-  # CPU and memory reservations and limits.
+  # CPU et mémoire du conteneur (même principe que le frontend).
   resources:
     requests:
+      # CPU réservé.
       cpu: 100m
-      memory: 100Mi
+      # Mémoire réservée (Redis garde les données en mémoire).
+      memory: 128Mi
     limits:
+      # CPU maximum.
       cpu: 250m
+      # Mémoire maximum.
       memory: 256Mi
 
-  # Checks whether Redis responds to commands.
+  # Readiness probe (redis-cli ping).
   readinessProbe:
+    # Secondes d'attente avant le premier test.
     initialDelaySeconds: 5
+    # Secondes entre deux tests.
     periodSeconds: 5
+    # Secondes max pour une réponse.
     timeoutSeconds: 2
+    # Nombre d'échecs de suite avant de considérer le pod pas prêt.
     failureThreshold: 3
 
-  # Restarts Redis if it becomes unresponsive.
+  # Liveness probe (redis-cli ping).
   livenessProbe:
+    # Plus long : Redis doit avoir le temps de relire son fichier AOF.
     initialDelaySeconds: 15
+    # Secondes entre deux tests.
     periodSeconds: 10
+    # Secondes max pour une réponse.
     timeoutSeconds: 2
+    # Nombre d'échecs de suite avant le redémarrage.
     failureThreshold: 3
 
 
-# ------------------------------------------------------------
-# 4. Redis Followers
-# ------------------------------------------------------------
+# ---------- Redis followers ----------
 
 redisFollower:
 
-  # Number of Redis read replicas.
+  # Nombre de followers.
   replicaCount: 1
 
-  # Official Guestbook Redis Follower Docker image.
   image:
+    # Image follower du Guestbook (Redis qui se connecte à redis-leader).
     repository: us-docker.pkg.dev/google-samples/containers/gke/gb-redis-follower
+    # Version de l'image (jamais "latest").
     tag: "v2"
+    # On ne retélécharge pas l'image si elle est déjà sur le nœud.
     pullPolicy: IfNotPresent
 
-  # Internal Kubernetes Service.
-  service:
-    # Name expected by the Guestbook frontend.
-    name: redis-follower
+  # Commande de démarrage du conteneur. Vide = celle de l'image (normal).
+  # Remplie seulement dans values-mac.yaml (voir ce fichier).
+  args: []
 
-    # Default Redis TCP port.
+  service:
+    # Nom du Service. NE PAS CHANGER : le frontend lit les messages
+    # sur "redis-follower".
+    name: redis-follower
+    # Port de Redis.
     port: 6379
 
-  # CPU and memory reservations and limits.
+  # CPU et mémoire du conteneur.
   resources:
     requests:
+      # CPU réservé.
       cpu: 100m
-      memory: 100Mi
+      # Mémoire réservée.
+      memory: 128Mi
     limits:
+      # CPU maximum.
       cpu: 250m
+      # Mémoire maximum.
       memory: 256Mi
 
-  # Checks whether a Redis Follower is ready.
+  # Readiness probe (redis-cli ping).
   readinessProbe:
+    # Secondes d'attente avant le premier test.
     initialDelaySeconds: 5
+    # Secondes entre deux tests.
     periodSeconds: 5
+    # Secondes max pour une réponse.
     timeoutSeconds: 2
+    # Nombre d'échecs de suite avant de considérer le pod pas prêt.
     failureThreshold: 3
 
-  # Restarts an unresponsive Redis Follower.
+  # Liveness probe (redis-cli ping).
   livenessProbe:
+    # Le temps de recopier les données du leader.
     initialDelaySeconds: 15
+    # Secondes entre deux tests.
     periodSeconds: 10
+    # Secondes max pour une réponse.
     timeoutSeconds: 2
+    # Nombre d'échecs de suite avant le redémarrage.
     failureThreshold: 3

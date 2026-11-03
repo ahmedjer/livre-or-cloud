@@ -1,36 +1,33 @@
-
-# ==================================================
-# Cloud Guestbook - GKE Autopilot Infrastructure
-# ==================================================
-# Creates the GKE cluster using the mandatory
-# Terraform Google Kubernetes Engine module.
-# Application deployment is handled separately by Helm.
+# Création du cluster GKE Autopilot avec le module imposé.
+# Terraform crée seulement le cluster. L'application est
+# installée ensuite avec Helm.
 
 module "gke" {
-  # Official GKE Autopilot public cluster submodule.
-  source  = "terraform-google-modules/kubernetes-engine/google//modules/beta-autopilot-public-cluster"
+  # Module imposé : cluster GKE Autopilot avec un accès public à l'API.
+  source = "terraform-google-modules/kubernetes-engine/google//modules/beta-autopilot-public-cluster"
+  # Version 46.x du module. source et version ne peuvent pas être des variables.
   version = "~> 46.0"
 
-  # Temporary Google Cloud project provided by the lab.
+  # Projet GCP donné par le lab (il change à chaque session).
   project_id = var.project_id
 
-  # Required Kubernetes cluster name.
+  # Nom du cluster : autopilot-cluster-1.
   name = var.cluster_name
 
-  # Regional deployment location.
+  # Région donnée par le lab. Un cluster Autopilot est toujours régional.
   region = var.region
 
-  # Existing default VPC and regional subnet.
+  # Réseau et sous-réseau "default", qui existent déjà dans le projet du lab.
   network    = var.network
   subnetwork = var.subnetwork
 
-  # Automatic IP range allocation.
+  # null : GKE crée lui-même les plages d'adresses IP des pods et des services.
   ip_range_pods     = var.ip_range_pods
   ip_range_services = var.ip_range_services
 
-  # Regular channel for managed Kubernetes updates.
+  # Canal de mise à jour de GKE (REGULAR = versions déjà testées).
   release_channel = var.release_channel
 
-  # Disabled to allow deletion at the end of the lab.
+  # false : sinon terraform destroy ne peut pas supprimer le cluster.
   deletion_protection = var.deletion_protection
 }

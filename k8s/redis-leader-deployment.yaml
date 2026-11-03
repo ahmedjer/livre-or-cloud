@@ -1,7 +1,6 @@
 
-# Redis Leader Deployment
-# Runs a single Redis writer with persistent storage.
-# Recreate prevents old and new writers running simultaneously.
+# Deployment du Redis leader, avec ses données sur un volume persistant.
+# Recreate : l'ancien pod est arrêté avant que le nouveau démarre.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -39,7 +38,7 @@ spec:
           image: docker.io/redis:6.0.5
           imagePullPolicy: IfNotPresent
 
-          # Load Redis settings from our ConfigMap.
+          # On lance Redis avec notre fichier redis.conf.
           command:
             - redis-server
             - /usr/local/etc/redis/redis.conf
@@ -49,7 +48,7 @@ spec:
               containerPort: 6379
               protocol: TCP
 
-          # Readiness: can this Pod receive traffic?
+          # Readiness : le pod peut-il recevoir du trafic ?
           readinessProbe:
             exec:
               command:
@@ -60,7 +59,7 @@ spec:
             timeoutSeconds: 2
             failureThreshold: 3
 
-          # Liveness: should Kubernetes restart Redis?
+          # Liveness : faut-il redémarrer Redis ?
           livenessProbe:
             exec:
               command:
@@ -74,18 +73,18 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 100Mi
+              memory: 128Mi
             limits:
               cpu: 250m
               memory: 256Mi
 
           volumeMounts:
-            # Redis configuration from ConfigMap.
+            # Le fichier redis.conf (ConfigMap).
             - name: redis-config
               mountPath: /usr/local/etc/redis
               readOnly: true
 
-            # Persistent storage for Redis data.
+            # Les données Redis (volume persistant).
             - name: redis-data
               mountPath: /data
 

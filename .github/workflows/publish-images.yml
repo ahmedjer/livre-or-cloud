@@ -1,4 +1,6 @@
-﻿name: Publish Guestbook Images
+# Copie les images Guestbook vers le registre GitHub (GHCR).
+# Lancement manuel uniquement. Le chart n'utilise pas ces copies.
+name: Copie des images Guestbook
 
 on:
   workflow_dispatch:
@@ -12,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install Skopeo
+      - name: Installer Skopeo
         run: |
           sudo apt-get update
           sudo apt-get install -y skopeo
 
-      - name: Publish images to GitHub Container Registry
+      - name: Copier les images vers GHCR
         env:
           GH_USER: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

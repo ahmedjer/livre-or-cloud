@@ -1,8 +1,7 @@
-# Patterns to ignore when building packages.
-# This supports shell glob matching, relative path matching, and
-# negation (prefixed with !). Only one pattern per line.
+# Fichiers à ne pas mettre dans le paquet du chart (helm package).
+# Fichiers système
 .DS_Store
-# Common VCS dirs
+# Dossiers de gestion de version
 .git/
 .gitignore
 .bzr/
@@ -10,13 +9,13 @@
 .hg/
 .hgignore
 .svn/
-# Common backup files
+# Fichiers de sauvegarde
 *.swp
 *.bak
 *.tmp
 *.orig
 *~
-# Various IDEs
+# Éditeurs
 .project
 .idea/
 *.tmproj

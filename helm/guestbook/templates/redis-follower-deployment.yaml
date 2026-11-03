@@ -1,69 +1,56 @@
-
-# Redis Follower Deployment Helm Template
-# Deploys Redis read replicas synchronized with the Redis Leader.
-# Replica count, image, probes and resources are configurable.
-
+{{/*
+Deployment des Redis followers (copies du leader, pour la lecture).
+L'image se connecte toute seule à redis-leader au démarrage et
+recopie les données : les followers n'ont pas besoin de volume.
+*/}}
+{{- $component := dict "root" . "component" "redis-follower" }}
 apiVersion: apps/v1
 kind: Deployment
-
 metadata:
-  name: redis-follower
-
+  name: {{ include "guestbook.componentName" $component }}
   labels:
-    {{- include "guestbook.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis-follower
-
+    {{- include "guestbook.componentLabels" $component | nindent 4 }}
 spec:
-  # Configurable replica count.
   replicas: {{ .Values.redisFollower.replicaCount }}
-
-  # Rolling updates for high availability.
   strategy:
     type: RollingUpdate
     rollingUpdate:
+      # 1 pod en plus pendant la mise à jour, et jamais de pod en moins.
       maxSurge: 1
       maxUnavailable: 0
-
   selector:
     matchLabels:
-      {{- include "guestbook.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: redis-follower
-
+      {{- include "guestbook.componentSelectorLabels" $component | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "guestbook.labels" . | nindent 8 }}
-        app.kubernetes.io/component: redis-follower
-
+        {{- include "guestbook.componentLabels" $component | nindent 8 }}
     spec:
       containers:
         - name: redis-follower
-
-          # Image configured through values.yaml.
           image: "{{ .Values.redisFollower.image.repository }}:{{ .Values.redisFollower.image.tag }}"
           imagePullPolicy: {{ .Values.redisFollower.image.pullPolicy }}
-
           ports:
             - name: redis
               containerPort: {{ .Values.redisFollower.service.port }}
               protocol: TCP
-
-          # Redis readiness probe.
+          {{- with .Values.redisFollower.args }}
+          # Commande de démarrage, seulement si redisFollower.args est rempli
+          # (utilisé sur Mac avec values-mac.yaml).
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             exec:
               command:
                 - redis-cli
                 - ping
             {{- toYaml .Values.redisFollower.readinessProbe | nindent 12 }}
-
-          # Redis liveness probe.
           livenessProbe:
             exec:
               command:
                 - redis-cli
                 - ping
             {{- toYaml .Values.redisFollower.livenessProbe | nindent 12 }}
-
-          # Configurable CPU and memory resources.
           resources:
             {{- toYaml .Values.redisFollower.resources | nindent 12 }}

@@ -1,18 +1,14 @@
-
-# PHP Guestbook Frontend ConfigMap Helm Template
-# Defines the environment variables used by the application.
-# Values are provided through values.yaml.
-
+{{/*
+ConfigMap du frontend PHP.
+Contient les variables d'environnement de l'application.
+Chaque clé de frontend.env (values.yaml) donne une variable.
+*/}}
 apiVersion: v1
 kind: ConfigMap
-
 metadata:
-  name: frontend-config
-
+  name: {{ include "guestbook.componentName" (dict "root" . "component" "frontend") }}
   labels:
-    {{- include "guestbook.labels" . | nindent 4 }}
-    app.kubernetes.io/component: frontend
-
+    {{- include "guestbook.componentLabels" (dict "root" . "component" "frontend") | nindent 4 }}
 data:
   {{- range $key, $value := .Values.frontend.env }}
   {{ $key }}: {{ $value | quote }}

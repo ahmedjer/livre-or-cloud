@@ -1,212 +1,99 @@
+# Architecture
 
-# Architecture — Cloud Guestbook
+Retour au [README](../README.md).
 
-## 1. Présentation
+## 1. Les deux environnements
 
-Cloud Guestbook est une application de livre d'or basée sur une
-architecture PHP + Redis, déployée sur Kubernetes.
+| | En local | Sur le cloud |
+|---|---|---|
+| Cluster | minikube avec Docker Desktop | GKE Autopilot créé par Terraform |
+| Connexion kubectl | contexte `minikube` | `gcloud container clusters get-credentials` |
+| Installation | `helm install` / `helm upgrade` | les mêmes commandes |
+| Accès au site | LoadBalancer + `minikube tunnel`, sur 127.0.0.1 | d'abord ClusterIP + `port-forward`, puis LoadBalancer avec une IP publique |
+| StorageClass par défaut | `standard` | `standard-rwo` (un disque Google) |
 
-Le projet utilise trois technologies principales :
+C'est le même chart dans les deux cas, avec les mêmes fichiers de valeurs. Seul le type du Service
+du frontend change pendant la phase de test sur GKE.
 
-- **Terraform** : provisionnement du cluster GKE Autopilot.
-- **Kubernetes** : orchestration des composants applicatifs.
-- **Helm** : packaging, configuration et déploiement de Guestbook.
+Terraform crée uniquement le cluster (et un compte de service pour ses nœuds). Helm ne crée rien
+dans GCP lui-même. Par contre, quand Helm crée un Service LoadBalancer ou un PVC, GKE crée
+automatiquement un load balancer ou un disque dans le projet.
 
-L'application est déployée dans trois environnements indépendants :
-`dev`, `staging` et `prod`.
+## 2. Les objets d'une release
 
-## 2. Environnements d'exécution
+Exemple pour prod (pour les autres, on remplace `prod` par `dev` ou `staging`) :
 
-### Environnement local
+| Type | Nom | Rôle |
+|---|---|---|
+| Deployment | `stack-prod-guestbook-frontend` | le site PHP, 3 pods, RollingUpdate |
+| Deployment | `stack-prod-guestbook-redis-leader` | le Redis qui reçoit les écritures, 1 pod, Recreate |
+| Deployment | `stack-prod-guestbook-redis-follower` | les copies de Redis pour la lecture, 2 pods |
+| Service | `frontend` | LoadBalancer ou ClusterIP, port 8082 |
+| Service | `redis-leader` | ClusterIP, port 6379 |
+| Service | `redis-follower` | ClusterIP, port 6379 |
+| ConfigMap | `stack-prod-guestbook-frontend` | la variable `GET_HOSTS_FROM=dns` |
+| ConfigMap | `stack-prod-guestbook-redis-leader` | le fichier `redis.conf` |
+| PVC | `stack-prod-guestbook-redis-leader-data` | le volume de 2Gi monté sur `/data` |
 
-- Docker Desktop et Minikube.
-- Trois namespaces Kubernetes.
-- Trois releases Helm.
-- Stockage persistant avec la StorageClass `standard`.
-- Frontends accessibles grâce à `minikube tunnel`.
+Tous les objets ont les mêmes labels : `app.kubernetes.io/name`, `instance`, `version`,
+`component`, `part-of`, `managed-by`, `helm.sh/chart`, `environment` et `team`.
 
-**État : déployé et validé.**
+Les Services Redis gardent des noms courts parce que les images les cherchent sous ces noms
+(voir decisions.md, D6). Comme chaque environnement est dans son namespace, avoir le même nom
+dans dev et dans prod ne pose pas de problème.
 
-### Environnement cloud
+## 3. Comment les messages circulent
 
-- Google Kubernetes Engine (GKE) Autopilot.
-- Cluster `autopilot-cluster-1`.
-- Infrastructure déclarée avec Terraform.
-- Même chart Helm que sur Minikube.
-- Stockage dynamique fourni par la StorageClass du cluster.
-
-**État : configuration Terraform validée, déploiement cloud
-en attente d'accès au laboratoire Google Skills.**
-
-## 3. Architecture applicative
-
-Chaque namespace contient une instance indépendante de Guestbook.
-
-```mermaid
-flowchart TB
-    U["Utilisateur / Navigateur"]
-    S["Service frontend"]
-    F["Frontend PHP"]
-    FL["ConfigMap frontend"]
-    LS["Service redis-leader"]
-    L["Redis Leader"]
-    LC["ConfigMap redis-leader"]
-    FS["Service redis-follower"]
-    R["Redis Followers"]
-    PVC["PersistentVolumeClaim"]
-    PV["PersistentVolume"]
-
-    U --> S
-    S --> F
-    FL -. "Configuration" .-> F
-
-    F -->|"Écritures"| LS
-    F -->|"Lectures"| FS
-
-    LS --> L
-    FS --> R
-
-    L -->|"Réplication"| R
-    LC -. "redis.conf" .-> L
-
-    L -->|"/data"| PVC
-    PVC --> PV
+```
+  navigateur
+      |
+      v
+  Service frontend --> pods frontend (PHP)  <-- ConfigMap frontend (GET_HOSTS_FROM=dns)
+                         |            |
+                    écriture        lecture
+                         v            v
+          Service redis-leader    Service redis-follower
+                         v            v
+               pod redis-leader <--- pods redis-follower
+                         |       (ils copient le leader)
+                         |  <-- ConfigMap redis.conf
+                         v
+               PVC monté sur /data --> disque (StorageClass par défaut)
 ```
 
-### Fonctionnement
+1. Le navigateur appelle la page PHP par le Service `frontend`.
+2. Pour écrire un message, le PHP se connecte à `redis-leader`. Pour lire, il se connecte à
+   `redis-follower`.
+3. Les followers se connectent au leader au démarrage et reçoivent chaque nouveau message.
+4. Le leader écrit chaque message dans le fichier `/data/appendonly.aof`, sur le volume.
 
-1. L'utilisateur accède au frontend PHP via un Service Kubernetes.
-2. Le frontend envoie les écritures à `redis-leader`.
-3. Les lectures sont effectuées via `redis-follower`.
-4. Les followers répliquent les données du leader.
-5. Redis Leader conserve ses données dans `/data`, sur un PVC.
+## 4. Où sont les données
 
-Les noms `redis-leader` et `redis-follower` sont conservés car
-ils sont utilisés par les images officielles de Guestbook.
+- Les messages sont dans la clé Redis `guestbook`.
+- Redis les enregistre dans `/data/appendonly.aof` dans le pod leader.
+- `/data` est le PVC `stack-<ENV>-guestbook-redis-leader-data`.
+- Derrière le PVC il y a un vrai disque : sur GKE un disque Google (`gcloud compute disks list`,
+  nom `pvc-...`), sur minikube un dossier dans la machine minikube.
 
-## 4. Isolation des environnements
+Les messages restent quand : le pod leader est supprimé ou redémarre, on fait un `helm upgrade`
+ou un `helm rollback`, un nœud est remplacé, ou on fait un `helm uninstall` (le PVC est gardé).
 
-| Composant | dev | staging | prod |
+Les messages sont perdus si : on supprime le PVC, ou on détruit le cluster.
+
+Les followers n'ont pas de volume : quand ils redémarrent, ils recopient tout depuis le leader.
+
+## 5. Différences entre environnements
+
+| | dev | staging | prod |
 |---|---|---|---|
-| Release Helm | stack-dev | stack-staging | stack-prod |
-| Frontend | 1 | 2 | 3 |
-| Redis Leader | 1 | 1 | 1 |
-| Redis Followers | 1 | 2 | 2 |
-| PVC Redis | 1 GiB | 1 GiB | 2 GiB |
-| Port frontend local | 8080 | 8081 | 8082 |
+| Pods frontend / leader / followers | 1 / 1 / 1 | 2 / 1 / 2 | 3 / 1 / 2 |
+| Ressources | réduites | par défaut | plus grandes |
+| Taille du volume | 1Gi | 1Gi | 2Gi |
+| Port du frontend | 8080 | 8081 | 8082 |
 
-Chaque environnement possède ses propres Deployments, Services,
-ConfigMaps et volumes persistants.
+Le détail est dans le README (partie 7.3).
 
-Les messages enregistrés dans un namespace ne sont pas partagés
-avec les autres environnements.
+## 6. Limites
 
-## 5. Persistance des données
-
-Le Redis Leader utilise :
-
-- Un PersistentVolumeClaim monté sur `/data`.
-- Un PersistentVolume provisionné dynamiquement.
-- La persistance Redis AOF (`appendonly yes`).
-- La synchronisation disque (`appendfsync always`).
-
-La stratégie de déploiement du Redis Leader est `Recreate`.
-
-Cette stratégie évite de faire fonctionner simultanément deux
-instances du leader utilisant le même volume en écriture.
-
-Une interruption temporaire du service est possible lors du
-redémarrage du leader.
-
-La persistance a été vérifiée sur Minikube après suppression et
-recréation du Pod Redis Leader.
-
-Un PVC ne constitue toutefois pas une sauvegarde indépendante.
-
-## 6. Stratégies de déploiement
-
-| Composant | Stratégie | Justification |
-|---|---|---|
-| Redis Leader | Recreate | Éviter deux processus écrivains concurrents |
-| Redis Followers | RollingUpdate | Mettre à jour les replicas progressivement |
-| Frontend | RollingUpdate | Réduire les interruptions de service |
-
-Les conteneurs possèdent des readiness probes, liveness probes
-et des ressources CPU/mémoire configurables.
-
-## 7. Rôle de Terraform
-
-Terraform utilise le module :
-
-`terraform-google-modules/kubernetes-engine/google//modules/beta-autopilot-public-cluster`
-
-Version : `~> 46.0`
-
-Il est responsable du provisionnement du cluster GKE Autopilot.
-
-Le déploiement de l'application n'est pas effectué par Terraform :
-il est pris en charge par Helm.
-
-Le state Terraform est local pour le laboratoire temporaire.
-Dans un environnement d'entreprise, un backend distant sécurisé
-avec contrôle d'accès et mécanisme de verrouillage serait préférable.
-
-## 8. Rôle de Helm
-
-Le chart réutilisable se trouve dans :
-
-`helm/guestbook/`
-
-Les différences entre les environnements sont configurées avec :
-
-- `values-dev.yaml`
-- `values-staging.yaml`
-- `values-prod.yaml`
-
-Le chart possède également un fichier `values.yaml` contenant
-les valeurs par défaut.
-
-Les versions du chart sont gérées dans `Chart.yaml`.
-
-Les opérations `helm upgrade` et `helm rollback` ont été testées
-sur Minikube avec conservation des données Redis.
-
-La release de développement a été migrée depuis des manifestes
-Kubernetes classiques vers Helm en conservant son PVC existant.
-
-## 9. Exposition réseau
-
-### Minikube
-
-Les Services frontend utilisent le type `LoadBalancer`.
-
-La commande `minikube tunnel` fournit l'accès local.
-
-### GKE Autopilot
-
-Le déploiement cloud est prévu en deux étapes :
-
-1. Service `ClusterIP`, testé avec `kubectl port-forward`.
-2. Passage en `LoadBalancer` avec `helm upgrade`.
-
-Les Services Redis restent internes au cluster (`ClusterIP`).
-
-## 10. Limites de sécurité et de disponibilité
-
-Cette architecture constitue un laboratoire pédagogique et
-non une infrastructure de production prête à l'emploi.
-
-Limites identifiées :
-
-- Redis n'utilise pas d'authentification.
-- Redis utilise `protected-mode no` dans le laboratoire.
-- Un seul Redis Leader est déployé.
-- Pas de basculement automatique du leader.
-- Absence de chiffrement HTTPS applicatif configuré.
-- Pas de sauvegarde externalisée automatisée.
-- La destruction du cluster GKE entraîne des risques de perte
-  des données si aucune sauvegarde n'est conservée.
-
-Des améliorations seraient nécessaires pour un déploiement
-en production : authentification, TLS, NetworkPolicies, gestion
-des secrets, sauvegardes externalisées et haute disponibilité.
+C'est un projet d'école, pas une vraie production : Redis sans mot de passe, un seul leader, pas
+de HTTPS, pas de sauvegarde automatique. Voir la partie 10 du README.

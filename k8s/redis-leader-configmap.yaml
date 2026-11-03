@@ -1,6 +1,5 @@
 
-# Redis Leader ConfigMap
-# Configures persistence and internal network access for the lab.
+# ConfigMap du Redis leader : le fichier redis.conf.
 
 apiVersion: v1
 kind: ConfigMap
@@ -14,18 +13,18 @@ metadata:
 
 data:
   redis.conf: |
-    # Listen on the Pod network interface.
+    # Écouter sur toutes les interfaces du pod.
     bind 0.0.0.0
 
-    # Lab only: other Pods need access without authentication.
-    # Production requires Redis ACLs and network restrictions.
+    # Pas de mot de passe dans ce projet : on désactive le mode protégé.
+    # En vraie production il faudrait un mot de passe.
     protected-mode no
 
-    # Persistent data directory.
+    # Dossier des données = le volume persistant.
     dir /data
 
-    # Enable append-only persistence.
+    # Mode AOF : chaque écriture est ajoutée au fichier appendonly.aof.
     appendonly yes
 
-    # Synchronize every write to disk.
+    # Écriture sur le disque après chaque commande.
     appendfsync always

@@ -1,30 +1,62 @@
+# Environnement dev (release stack-dev, namespace dev).
+# Seulement ce qui change par rapport à values.yaml.
+# Peu de trafic : 1 pod par composant et moins de ressources.
 
-# =====================================================
-# Development Environment - Helm Overrides
-# Release: stack-dev
-# Namespace: dev
-# =====================================================
-
-# Preserve the immutable selectors of existing dev Deployments.
-selectorInstanceOverride: "guestbook"
-
-# Environment-specific labels.
 commonLabels:
+  # Label environment sur tous les objets.
   environment: dev
 
-# PHP Frontend configuration.
 frontend:
+  # 1 seul pod suffit pour les tests.
   replicaCount: 1
-
   service:
+    # LoadBalancer. Sur GKE, pour la phase de test, on ajoute
+    # --set frontend.service.type=ClusterIP à la commande helm.
     type: LoadBalancer
+    # Port 8080 (staging 8081, prod 8082).
     port: 8080
+  # Ressources réduites.
+  resources:
+    requests:
+      # CPU réservé.
+      cpu: 50m
+      # Mémoire réservée.
+      memory: 64Mi
+    limits:
+      # CPU maximum.
+      cpu: 200m
+      # Mémoire maximum.
+      memory: 128Mi
 
-# Redis Leader persistent storage.
 redisLeader:
   persistence:
+    # Peu de messages en dev.
     size: 1Gi
+  # Ressources réduites.
+  resources:
+    requests:
+      # CPU réservé.
+      cpu: 50m
+      # Mémoire réservée.
+      memory: 64Mi
+    limits:
+      # CPU maximum.
+      cpu: 200m
+      # Mémoire maximum.
+      memory: 128Mi
 
-# Number of Redis read replicas.
 redisFollower:
+  # 1 seul follower.
   replicaCount: 1
+  # Ressources réduites.
+  resources:
+    requests:
+      # CPU réservé.
+      cpu: 50m
+      # Mémoire réservée.
+      memory: 64Mi
+    limits:
+      # CPU maximum.
+      cpu: 200m
+      # Mémoire maximum.
+      memory: 128Mi

@@ -1,70 +1,65 @@
+# Variables de la configuration Terraform.
+# project_id et region changent à chaque session de lab :
+# elles n'ont pas de valeur par défaut, on les met dans terraform.tfvars.
 
-# =============================================
-# Cloud Guestbook - Terraform Input Variables
-# =============================================
-
-# Google Cloud project ID assigned by the Skills lab.
 variable "project_id" {
-  description = "Google Cloud project ID provided by the temporary lab."
+  description = "ID du projet GCP donné par le lab (exemple : qwiklabs-gcp-01-xxxxxxxx)."
   type        = string
 }
 
-# Name of the GKE Autopilot cluster.
 variable "cluster_name" {
-  description = "Name of the GKE Autopilot cluster."
+  description = "Nom du cluster GKE."
   type        = string
   default     = "autopilot-cluster-1"
 }
 
-# Google Cloud region selected for the cluster.
 variable "region" {
-  description = "GCP region provided or permitted by the lab."
+  description = "Région GCP donnée par le lab (exemple : us-central1). Une région, pas une zone."
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z]+-[a-z]+[0-9]+$", var.region))
+    error_message = "La région doit ressembler à us-central1 ou europe-west1 (pas une zone comme us-central1-a)."
+  }
 }
 
-# Existing Google Cloud VPC network.
 variable "network" {
-  description = "Name of the existing VPC network."
+  description = "Nom du réseau VPC existant."
   type        = string
   default     = "default"
 }
 
-# Existing subnet in the selected region.
 variable "subnetwork" {
-  description = "Name of the existing GCP subnetwork."
+  description = "Nom du sous-réseau existant dans la région."
   type        = string
   default     = "default"
 }
 
-# Secondary IP range for Kubernetes Pods.
 variable "ip_range_pods" {
-  description = "Existing Pod secondary range name; null lets the module use automatic allocation."
+  description = "Plage IP secondaire pour les pods. null = gérée automatiquement par GKE."
   type        = string
   default     = null
 }
 
-# Secondary IP range for Kubernetes Services.
 variable "ip_range_services" {
-  description = "Existing Service secondary range name; null uses module defaults."
+  description = "Plage IP secondaire pour les services. null = gérée automatiquement par GKE."
   type        = string
   default     = null
 }
 
-# GKE Kubernetes release channel.
 variable "release_channel" {
-  description = "GKE release channel."
+  description = "Canal de mise à jour de GKE : RAPID, REGULAR ou STABLE."
   type        = string
   default     = "REGULAR"
 
   validation {
     condition     = contains(["RAPID", "REGULAR", "STABLE"], var.release_channel)
-    error_message = "The release channel must be RAPID, REGULAR or STABLE."
+    error_message = "Le canal doit être RAPID, REGULAR ou STABLE."
   }
 }
 
-# Allow Terraform to delete the temporary cluster.
 variable "deletion_protection" {
-  description = "Disable deletion protection for temporary lab cleanup."
+  description = "Protection contre la suppression du cluster. false pour pouvoir faire terraform destroy à la fin du lab."
   type        = bool
   default     = false
 }

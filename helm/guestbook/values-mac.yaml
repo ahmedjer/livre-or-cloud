@@ -1,0 +1,26 @@
+# Surcharge pour minikube sur un Mac à puce Apple (M1, M2...).
+# À ajouter EN PLUS du fichier de l'environnement :
+#   -f helm/guestbook/values-dev.yaml -f helm/guestbook/values-mac.yaml
+# Ne pas utiliser sur GKE ni sur un PC Intel/AMD.
+#
+# Pourquoi : l'image gb-redis-follower n'existe que pour les puces
+# Intel/AMD, et Redis plante quand il est émulé sur une puce Apple
+# (Segmentation fault). On utilise donc l'image Redis officielle,
+# qui existe pour les deux types de puces, avec la même commande que
+# celle de l'image de Google.
+
+redisFollower:
+  image:
+    # Image Redis officielle (la même que le leader).
+    repository: docker.io/redis
+    # Même version que le leader.
+    tag: "6.0.5"
+  # La commande que lance l'image gb-redis-follower : Redis qui copie
+  # le leader. protected-mode no pour que le frontend puisse s'y connecter.
+  args:
+    - redis-server
+    - --replicaof
+    - redis-leader
+    - "6379"
+    - --protected-mode
+    - "no"

@@ -1,7 +1,6 @@
 
-# Redis Leader Service
-# Internal ClusterIP Service for the Guestbook application.
-# Exposes the Redis leader only within the Kubernetes cluster.
+# Service interne du Redis leader.
+# Le frontend et les followers le trouvent avec le nom redis-leader.
 
 apiVersion: v1
 kind: Service

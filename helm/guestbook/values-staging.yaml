@@ -1,27 +1,26 @@
+# Environnement staging (release stack-staging, namespace staging).
+# Seulement ce qui change par rapport à values.yaml.
+# Proche de la prod pour tester les mises à jour.
+# Les ressources sont celles de values.yaml.
 
-# =====================================================
-# Staging Environment - Helm Overrides
-# Release: stack-staging
-# Namespace: staging
-# =====================================================
-
-# Environment-specific labels.
 commonLabels:
+  # Label environment sur tous les objets.
   environment: staging
 
-# PHP Frontend configuration.
 frontend:
+  # 2 pods : on peut voir le RollingUpdate sans coupure.
   replicaCount: 2
-
   service:
+    # LoadBalancer (minikube tunnel ou IP publique sur GKE).
     type: LoadBalancer
+    # Port 8081 (dev 8080, prod 8082).
     port: 8081
 
-# Redis Leader persistent storage.
 redisLeader:
   persistence:
+    # Seulement des données de test.
     size: 1Gi
 
-# Number of Redis read replicas.
 redisFollower:
+  # 2 followers comme en prod, pour tester la réplication.
   replicaCount: 2

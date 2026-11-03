@@ -1,66 +1,63 @@
 
-# ============================================
-# Cloud Guestbook - .gitignore
-# Kubernetes | Helm | Terraform | GKE
-# ============================================
+# Fichiers à ne jamais mettre dans Git.
 
 # --------------------------------------------
-# Terraform local files and downloaded providers
+# Terraform : dossier local et providers téléchargés
 # --------------------------------------------
 **/.terraform/
 
-# Terraform state files
+# State Terraform
 *.tfstate
 *.tfstate.*
 
-# Terraform variable files (may contain secrets)
+# Fichiers de variables (contiennent l'ID du projet du lab)
 **/*.tfvars
 **/*.tfvars.json
 
-# Terraform plans
+# Plans Terraform
 *.tfplan
 
-# Terraform crash logs
+# Logs de crash Terraform
 crash.log
 crash.*.log
 
-# Keep .terraform.lock.hcl tracked in Git
+# On garde .terraform.lock.hcl dans Git
 
 # --------------------------------------------
-# Credentials and local configuration
+# Identifiants et configuration locale
 # --------------------------------------------
 .env
 .env.*
 !.env.example
 
-# Kubernetes configuration and credentials
+# Configuration et identifiants Kubernetes
 **/kubeconfig
 **/kubeconfig.*
 *.pem
 *.key
 
-# Google Cloud credentials
+# Identifiants Google Cloud
 application_default_credentials.json
 *service-account*.json
 
 # --------------------------------------------
-# Helm generated files
+# Fichiers générés par Helm
 # --------------------------------------------
 helm/packages/
 *.tgz
 
 # --------------------------------------------
-# Editors and operating systems
+# Éditeurs et systèmes
 # --------------------------------------------
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
-# Python temporary files
+# Fichiers temporaires Python
 __pycache__/
 *.pyc
 
-# Temporary and backup files
+# Fichiers temporaires et sauvegardes
 *.tmp
 *.bak

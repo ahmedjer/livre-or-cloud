@@ -1,81 +1,67 @@
-
-# Redis Leader Deployment
-# One Redis writer with persistent storage.
-# Recreate strategy avoids overlapping Redis Leader Pods.
-
+{{/*
+Deployment du Redis leader (le seul Redis qui reçoit les écritures).
+Stratégie Recreate : l'ancien pod est arrêté AVANT que le nouveau
+démarre. Le volume est en ReadWriteOnce et un seul Redis doit écrire
+dans /data à la fois (explication dans docs/decisions.md).
+*/}}
+{{- $component := dict "root" . "component" "redis-leader" }}
 apiVersion: apps/v1
 kind: Deployment
-
 metadata:
-  name: redis-leader
-
+  name: {{ include "guestbook.componentName" $component }}
   labels:
-    {{- include "guestbook.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis-leader
-
+    {{- include "guestbook.componentLabels" $component | nindent 4 }}
 spec:
   replicas: {{ .Values.redisLeader.replicaCount }}
-
   strategy:
     type: Recreate
-
   selector:
     matchLabels:
-      {{- include "guestbook.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: redis-leader
-
+      {{- include "guestbook.componentSelectorLabels" $component | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "guestbook.labels" . | nindent 8 }}
-        app.kubernetes.io/component: redis-leader
-
+        {{- include "guestbook.componentLabels" $component | nindent 8 }}
     spec:
       containers:
         - name: redis-leader
-
           image: "{{ .Values.redisLeader.image.repository }}:{{ .Values.redisLeader.image.tag }}"
           imagePullPolicy: {{ .Values.redisLeader.image.pullPolicy }}
-
+          # On lance Redis avec notre fichier redis.conf.
           command:
             - redis-server
             - /usr/local/etc/redis/redis.conf
-
           ports:
             - name: redis
               containerPort: {{ .Values.redisLeader.service.port }}
               protocol: TCP
-
+          # redis-cli ping vérifie que Redis répond vraiment (réponse PONG).
           readinessProbe:
             exec:
               command:
                 - redis-cli
                 - ping
             {{- toYaml .Values.redisLeader.readinessProbe | nindent 12 }}
-
           livenessProbe:
             exec:
               command:
                 - redis-cli
                 - ping
             {{- toYaml .Values.redisLeader.livenessProbe | nindent 12 }}
-
           resources:
             {{- toYaml .Values.redisLeader.resources | nindent 12 }}
-
           volumeMounts:
+            # Le fichier redis.conf (ConfigMap).
             - name: redis-config
               mountPath: /usr/local/etc/redis
               readOnly: true
-
+            # Les données Redis (volume persistant).
             - name: redis-data
               mountPath: /data
-
       volumes:
         - name: redis-config
           configMap:
-            name: redis-leader-config
-
+            name: {{ include "guestbook.componentName" $component }}
         - name: redis-data
           persistentVolumeClaim:
-            claimName: redis-leader-pvc
+            claimName: {{ include "guestbook.componentName" $component }}-data

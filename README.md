@@ -38,8 +38,8 @@ Autres documents :
 | `helm upgrade` et `helm rollback` | testé sur minikube (chart 0.1.0) |
 | Terraform : `apply`, `plan` (No changes), `destroy` | testé sur GKE le 02/11 |
 | 3 releases Helm sur GKE | testé le 02/11 (chart 0.1.1, installées directement en LoadBalancer) |
-| Sur GKE : test en ClusterIP + port-forward, puis passage en LoadBalancer | pas encore fait |
-| Chart 0.2.0 (version actuelle) | `helm lint` OK, pas encore redéployé sur minikube ni sur GKE |
+| Sur GKE : test en ClusterIP + port-forward, puis passage en LoadBalancer | testé le 03/11 (chart 0.2.0) |
+| Chart 0.2.0 (version actuelle) | testé le 03/11 : 3 releases, persistance, upgrade et rollback sur minikube (Mac) ; Terraform + dev en ClusterIP puis LoadBalancer sur GKE |
 
 Dans la version 0.2.0 on a changé les noms des objets : ils sont maintenant générés par
 `_helpers.tpl` (par exemple `stack-prod-guestbook-redis-leader` au lieu de `redis-leader`). Les
@@ -159,7 +159,7 @@ Le chart Helm a été fait à partir de ces fichiers.
 | Outil | Version qu'on a utilisée |
 |---|---|
 | Git | 2.x |
-| Terraform | 1.16.6 (il faut au moins 1.3) |
+| Terraform | 1.16.6 en local, 1.9.8 dans Cloud Shell (il faut au moins 1.3) |
 | gcloud (Google Cloud CLI) | récente |
 | gke-gcloud-auth-plugin | récente |
 | kubectl | 1.30 ou plus |
@@ -168,7 +168,8 @@ Le chart Helm a été fait à partir de ces fichiers.
 | minikube | 1.37.0 |
 
 Le plus simple pour la partie cloud est d'utiliser **Cloud Shell** (dans la console du lab) :
-gcloud, kubectl, Helm et Terraform y sont déjà installés.
+gcloud, kubectl, Helm et le plugin GKE y sont déjà installés. **Terraform n'y est plus** (constaté
+le 03/11), on l'installe en début de session (voir 5.2, étape 3).
 
 Le plugin `gke-gcloud-auth-plugin` permet à kubectl de s'authentifier sur GKE. Pour l'installer
 et vérifier :
@@ -296,7 +297,17 @@ cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 # ouvrir terraform/terraform.tfvars et mettre le project_id et la region du lab
 ```
 
-3) Créer le cluster :
+3) Créer le cluster. Dans Cloud Shell, il faut d'abord installer Terraform (1 minute) :
+
+```bash
+mkdir -p ~/bin
+wget -q https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -O /tmp/tf.zip
+unzip -o -q /tmp/tf.zip -d ~/bin
+export PATH=$HOME/bin:$PATH     # à refaire dans chaque nouvel onglet Cloud Shell
+terraform version               # Terraform v1.9.8
+```
+
+Puis :
 
 ```bash
 terraform -chdir=terraform init       # télécharge le module et les providers
@@ -337,8 +348,14 @@ kubectl get deploy,svc,pvc -n dev    # svc/frontend en ClusterIP, PVC en Bound
 kubectl port-forward svc/frontend 18080:8080 -n dev
 ```
 
-Ouvrir http://127.0.0.1:18080 (dans Cloud Shell : bouton *Web Preview*, changer le port en
-18080) et écrire quelques messages. Arrêter avec `Ctrl+C`.
+Ouvrir http://127.0.0.1:18080 et écrire quelques messages. Dans Cloud Shell : icône *Web Preview*
+dans la barre au-dessus du terminal (parfois cachée dans le menu `⋮`), *Change port*, 18080.
+Sans navigateur, on peut tester depuis un autre onglet Cloud Shell :
+`curl -s "http://127.0.0.1:18080/guestbook.php?cmd=get&key=messages"`. Arrêter avec `Ctrl+C`.
+
+Ne pas faire `Ctrl+C` sur le `helm install` même s'il ne répond pas pendant plusieurs minutes :
+sinon la release reste en `failed` et il faut faire `helm uninstall stack-dev -n dev` avant de
+relancer.
 
 Au début, les pods peuvent rester quelques minutes en `Pending` : Autopilot crée les machines au
 moment où on en a besoin. C'est normal.
@@ -586,8 +603,9 @@ Ce projet n'est pas prêt pour une vraie production :
 - Les images sont des images d'exemple de Google et Redis 6.0.5 est une vieille version.
 - Pas de monitoring ni d'alertes.
 
-Ce qu'on n'a pas encore fait : le test ClusterIP puis LoadBalancer sur GKE, et le déploiement du
-chart 0.2.0 (voir partie 0).
+Ce qu'on n'a pas encore refait avec le chart 0.2.0 sur GKE : staging et prod, le test de
+persistance en prod et le `terraform destroy` jusqu'au bout (la session de lab s'est terminée
+pendant le destroy).
 
 ## 11. Démonstration
 

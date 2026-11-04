@@ -14,6 +14,11 @@ commonLabels:
 
 # PHP Frontend configuration.
 frontend:
+  # moins de ressources qu'en prod
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
   replicaCount: 1
 
   service:
@@ -22,9 +27,19 @@ frontend:
 
 # Redis Leader persistent storage.
 redisLeader:
+  # moins de ressources qu'en prod
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
   persistence:
     size: 1Gi
 
 # Number of Redis read replicas.
 redisFollower:
+  # moins de ressources qu'en prod
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
   replicaCount: 1

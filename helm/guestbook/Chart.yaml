@@ -20,7 +20,7 @@ type: application
 
 # Version of the Helm chart
 # Increment when modifying templates or chart configuration.
-version: 0.1.1
+version: 0.1.2
 
 # Version of the application deployed by the chart
 appVersion: "1.0.0"

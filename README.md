@@ -633,7 +633,7 @@ pendant le destroy).
 | 4 | `helm upgrade stack-dev`, le Service passe en LoadBalancer (5.2 étape 6) |
 | 5 | installation de staging et prod, `helm list -A` (5.2 étape 7) |
 | 6 | on supprime le pod redis-leader de prod, les messages restent (runbook R7) |
-| 7 | on passe `version` de 0.2.0 à 0.2.1 dans `Chart.yaml`, `helm upgrade stack-prod`, `helm history` (runbook R2) ; ne pas commiter ce changement |
+| 7 | `git switch chart-0.2.1` (branche préparée avec le chart en 0.2.1), `helm upgrade stack-prod`, `helm history` (runbook R2) ; la branche est fusionnée dans `main` seulement après la soutenance |
 | 8 | `kubectl describe deploy stack-prod-guestbook-redis-leader -n prod` : probes, ressources, labels, Recreate |
 | 9 | même chose en local avec minikube et `minikube tunnel` (5.1) |
 | 10 | `helm uninstall`, suppression des PVC et des namespaces, puis `terraform destroy` (runbook R10) |

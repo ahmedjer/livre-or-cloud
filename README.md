@@ -211,6 +211,9 @@ git clone https://github.com/ahmedjer/livre-or-cloud.git
 cd livre-or-cloud
 ```
 
+La version de référence est sur la branche `main` (la branche `correctifs-conformite` y a été
+fusionnée le 05/11). Ne pas travailler sur une autre branche sans le dire à l'équipe.
+
 ### 5.1 En local avec minikube
 
 1) Démarrer minikube (Docker Desktop doit être lancé) :
@@ -580,6 +583,10 @@ Les commandes de diagnostic sont dans le runbook R11. Les problèmes qu'on a dé
 |---|---|---|
 | `terraform apply` échoue : pas assez de ressources dans la région | GKE manquait de place dans le lab | relancer `terraform apply` |
 | `terraform init` : "not enough space on the disk" | disque plein | libérer de la place et relancer |
+| `terraform: command not found` dans Cloud Shell | nouvel onglet : le `PATH` est perdu | refaire `export PATH=$HOME/bin:$PATH` (voir 5.2, étape 3) |
+| `Error: API ... container.googleapis.com ... not enabled` | API Kubernetes Engine désactivée dans le lab | `gcloud services enable container.googleapis.com`, puis relancer `apply` |
+| release en `failed` après un `Ctrl+C` sur `helm install` | l'installation a été interrompue | `helm uninstall stack-<ENV> -n <ENV>`, puis relancer l'install |
+| une commande Helm part sur le mauvais cluster | mauvais contexte kubectl | `kubectl config get-contexts`, puis `kubectl config use-context <nom>` |
 | `gcloud.ps1 cannot be loaded` (PowerShell) | sécurité de PowerShell | utiliser `gcloud.cmd` |
 | `kubectl` : "connection refused" sur 127.0.0.1 | Docker Desktop ou minikube arrêté | démarrer Docker puis `minikube start` |
 | `helm install` : "resource already exists" ou "field is immutable" | des objets avaient été créés avant avec `kubectl apply` | voir 5.3 et 5.4 |
@@ -609,6 +616,15 @@ pendant le destroy).
 
 ## 11. Démonstration
 
+**À préparer avant l'oral** (l'énoncé autorise à lancer le `terraform apply` avant, vu sa durée) :
+
+1. démarrer le lab, ouvrir Cloud Shell, `gcloud config set project <PROJECT_ID>` ;
+2. `git clone` (voir 5), installer Terraform (5.2 étape 3), remplir `terraform/terraform.tfvars` ;
+3. `gcloud services enable container.googleapis.com`, puis `terraform init` et `terraform apply`
+   (environ 10 minutes) ;
+4. sur le poste local : Docker Desktop lancé, `minikube start --driver=docker`, et sur un Mac à
+   puce Apple l'émulateur Intel (voir 5.1).
+
 | Étape | Ce qu'on fait |
 |---|---|
 | 1 | `terraform -chdir=terraform plan` affiche No changes, puis `terraform -chdir=terraform output` |
@@ -617,7 +633,7 @@ pendant le destroy).
 | 4 | `helm upgrade stack-dev`, le Service passe en LoadBalancer (5.2 étape 6) |
 | 5 | installation de staging et prod, `helm list -A` (5.2 étape 7) |
 | 6 | on supprime le pod redis-leader de prod, les messages restent (runbook R7) |
-| 7 | on passe le chart en 0.2.1, `helm upgrade`, `helm history` (runbook R2) |
+| 7 | on passe `version` de 0.2.0 à 0.2.1 dans `Chart.yaml`, `helm upgrade stack-prod`, `helm history` (runbook R2) ; ne pas commiter ce changement |
 | 8 | `kubectl describe deploy stack-prod-guestbook-redis-leader -n prod` : probes, ressources, labels, Recreate |
 | 9 | même chose en local avec minikube et `minikube tunnel` (5.1) |
-| 10 | `helm uninstall` puis `terraform destroy` (runbook R10) |
+| 10 | `helm uninstall`, suppression des PVC et des namespaces, puis `terraform destroy` (runbook R10) |
